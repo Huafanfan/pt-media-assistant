@@ -1,0 +1,120 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import type { DiscoveryItem, DiscoveryReleaseResponse, ReleaseSummary } from "../../src/shared/contracts";
+import { DiscoveryInspector } from "../../src/client/components/DiscoveryInspector";
+
+const item: DiscoveryItem = {
+  id: "subject-4",
+  title: "百年孤独 第二季",
+  originalTitle: "Cien Años de Soledad S02",
+  year: "2024",
+  rating: 9.3,
+  ratingCount: 8240,
+  rank: 4,
+  mediaType: "tv",
+  genres: ["剧情", "奇幻", "历史"],
+  summary: "布恩迪亚家族的命运继续交织，爱、战争与预言在马孔多延续。",
+  sourceUrl: "https://movie.douban.com/subject/4/"
+};
+
+const release = (overrides: Partial<ReleaseSummary> = {}): ReleaseSummary => ({
+  id: "release-1",
+  title: "Cien.Años.de.Soledad.S02.1080p.WEB-DL",
+  indexer: "RARBG",
+  protocol: "torrent",
+  size: 21.3 * 1024 ** 3,
+  seeders: 128,
+  leechers: 2,
+  grabs: 4,
+  ageDays: 3,
+  categories: ["TV"],
+  resolution: "1080p",
+  codec: "H.264",
+  freeleech: true,
+  ...overrides
+});
+
+const response: DiscoveryReleaseResponse = {
+  itemId: item.id,
+  query: item.title,
+  status: "available",
+  checkedAt: "2026-08-29T00:00:00.000Z",
+  total: 2,
+  releases: [
+    release(),
+    release({
+      id: "release-2",
+      title: "Cien.Años.de.Soledad.S02.720p.WEBRip",
+      indexer: "影视工业网",
+      size: 19.6 * 1024 ** 3,
+      seeders: 86,
+      resolution: "720p",
+      freeleech: false
+    })
+  ]
+};
+
+function renderInspector(overrides: Partial<React.ComponentProps<typeof DiscoveryInspector>> = {}) {
+  const props: React.ComponentProps<typeof DiscoveryInspector> = {
+    item,
+    releaseResponse: response,
+    loading: false,
+    error: null,
+    selectedReleaseId: null,
+    selectingId: null,
+    onSelectRelease: vi.fn(),
+    onClose: vi.fn(),
+    onRetry: vi.fn(),
+    ...overrides
+  };
+  render(<DiscoveryInspector {...props} />);
+  return props;
+}
+
+describe("DiscoveryInspector", () => {
+  it("renders the selected item and radio-style candidate releases", async () => {
+    const user = userEvent.setup();
+    const props = renderInspector({ selectedReleaseId: "release-1" });
+
+    expect(screen.getByRole("heading", { name: "百年孤独 第二季" })).toBeInTheDocument();
+    expect(screen.getByText("1080p")).toBeInTheDocument();
+    expect(screen.getByText("21.3 GB")).toBeInTheDocument();
+    expect(screen.getByText("免费")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Cien\.Años\.de\.Soledad\.S02.*已选择/ })).toHaveAttribute("aria-checked", "true");
+
+    const radios = screen.getAllByRole("radio");
+    await user.click(radios[1]);
+    expect(props.onSelectRelease).toHaveBeenCalledWith(response.releases[1]);
+    expect(screen.getByRole("radio", { name: /720p.*未选择/ })).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("button", { name: /加入下载|查看片源/ })).not.toBeInTheDocument();
+  });
+
+  it("renders empty item and empty candidate states", () => {
+    cleanup();
+    renderInspector({ item: null, releaseResponse: null });
+    expect(screen.getByRole("status")).toHaveTextContent("选择一个条目");
+
+    cleanup();
+    renderInspector({ releaseResponse: { ...response, status: "unavailable", total: 0, releases: [] } });
+    expect(screen.getByRole("status")).toHaveTextContent("暂未找到候选片源");
+    expect(screen.getByRole("button", { name: "重新检查" })).toBeInTheDocument();
+  });
+
+  it("renders loading and error states and exposes retry/close controls", async () => {
+    const user = userEvent.setup();
+    cleanup();
+    const loadingProps = renderInspector({ loading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("正在检查片源");
+    expect(screen.getByRole("button", { name: "重新检查片源" })).toBeDisabled();
+
+    cleanup();
+    const errorProps = renderInspector({ error: "服务暂时不可用" });
+    expect(screen.getByRole("alert")).toHaveTextContent("服务暂时不可用");
+    await user.click(screen.getByRole("button", { name: "重试检查" }));
+    expect(errorProps.onRetry).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "关闭候选片源" }));
+    expect(errorProps.onClose).toHaveBeenCalledTimes(1);
+    expect(loadingProps.onRetry).not.toHaveBeenCalled();
+  });
+});

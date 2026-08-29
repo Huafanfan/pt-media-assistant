@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="430" viewBox="0 0 1400 430" role="img" aria-labelledby="title desc">
+  <title id="title">Four-step browse-first workflow</title>
+  <desc id="desc">Browse public collections, check availability, choose a release, then explicitly confirm the download.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#151923"/>
+      <stop offset="1" stop-color="#222a2c"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" x2="1">
+      <stop offset="0" stop-color="#f56d5c"/>
+      <stop offset="1" stop-color="#7ee6d0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="430" rx="32" fill="url(#bg)"/>
+  <path d="M164 210H1230" stroke="#3d4a4c" stroke-width="6" stroke-linecap="round"/>
+  <path d="M164 210H1230" stroke="url(#line)" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 20"/>
+  <g font-family="Inter, system-ui, sans-serif">
+    <text x="76" y="74" fill="#f4f7f6" font-size="30" font-weight="700">Browse first. Download last.</text>
+    <text x="76" y="108" fill="#9fb5b9" font-size="17">每一步都可停留在只读状态，下载是单独的明确动作。</text>
+
+    <g>
+      <circle cx="164" cy="210" r="48" fill="#f56d5c"/>
+      <text x="164" y="220" text-anchor="middle" fill="#fffaf4" font-size="25" font-weight="800">01</text>
+      <text x="164" y="304" text-anchor="middle" fill="#f4f7f6" font-size="21" font-weight="700">发现榜单</text>
+      <text x="164" y="334" text-anchor="middle" fill="#9fb5b9" font-size="15">热门 / 口碑 / Top 250</text>
+    </g>
+    <g>
+      <circle cx="520" cy="210" r="48" fill="#d88764"/>
+      <text x="520" y="220" text-anchor="middle" fill="#fffaf4" font-size="25" font-weight="800">02</text>
+      <text x="520" y="304" text-anchor="middle" fill="#f4f7f6" font-size="21" font-weight="700">检查片源</text>
+      <text x="520" y="334" text-anchor="middle" fill="#9fb5b9" font-size="15">低频查询 Prowlarr</text>
+    </g>
+    <g>
+      <circle cx="876" cy="210" r="48" fill="#6bc5b1"/>
+      <text x="876" y="220" text-anchor="middle" fill="#102a2a" font-size="25" font-weight="800">03</text>
+      <text x="876" y="304" text-anchor="middle" fill="#f4f7f6" font-size="21" font-weight="700">选择候选</text>
+      <text x="876" y="334" text-anchor="middle" fill="#9fb5b9" font-size="15">看体积、做种与规格</text>
+    </g>
+    <g>
+      <circle cx="1230" cy="210" r="48" fill="#7ee6d0"/>
+      <text x="1230" y="220" text-anchor="middle" fill="#102a2a" font-size="25" font-weight="800">04</text>
+      <text x="1230" y="304" text-anchor="middle" fill="#f4f7f6" font-size="21" font-weight="700">明确确认</text>
+      <text x="1230" y="334" text-anchor="middle" fill="#9fb5b9" font-size="15">确认后才交给 qBittorrent</text>
+    </g>
+  </g>
+</svg>

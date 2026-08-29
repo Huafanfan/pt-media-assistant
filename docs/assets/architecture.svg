@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="640" viewBox="0 0 1400 640" role="img" aria-labelledby="title desc">
+  <title id="title">PT Media Assistant architecture</title>
+  <desc id="desc">A trusted LAN browser connects to the local assistant, which reads public Douban lists, searches Prowlarr, sends confirmed grabs to qBittorrent, and writes to a configured NAS mount.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101927"/>
+      <stop offset="1" stop-color="#172b35"/>
+    </linearGradient>
+    <linearGradient id="assistant" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ff9f67"/>
+      <stop offset="1" stop-color="#f56d5c"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="0" x2="1">
+      <stop offset="0" stop-color="#7ee6d0"/>
+      <stop offset="1" stop-color="#45b9aa"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#061016" flood-opacity=".42"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#8ba6ac"/>
+    </marker>
+    <marker id="arrowAccent" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#ff9f67"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="640" rx="32" fill="url(#bg)"/>
+  <circle cx="1230" cy="80" r="220" fill="#45b9aa" opacity=".08"/>
+  <circle cx="70" cy="590" r="260" fill="#f56d5c" opacity=".07"/>
+  <text x="76" y="82" fill="#f4f7f6" font-family="Inter, system-ui, sans-serif" font-size="30" font-weight="700">Local-first media flow</text>
+  <text x="76" y="116" fill="#9fb5b9" font-family="Inter, system-ui, sans-serif" font-size="17">Secrets stay behind the server boundary; only sanitized status reaches the browser.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="76" y="224" width="236" height="146" rx="22" fill="#233744" stroke="#49616a"/>
+    <rect x="356" y="170" width="310" height="254" rx="28" fill="url(#assistant)"/>
+    <rect x="714" y="224" width="236" height="146" rx="22" fill="#233744" stroke="#49616a"/>
+    <rect x="998" y="224" width="236" height="146" rx="22" fill="#233744" stroke="#49616a"/>
+    <rect x="506" y="496" width="320" height="92" rx="22" fill="#1d3a3d" stroke="#4e817d"/>
+  </g>
+
+  <g fill="none" stroke="#8ba6ac" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M312 297H348"/>
+    <path d="M666 297H706"/>
+    <path d="M950 297H990"/>
+    <path d="M1120 378V456H826"/>
+  </g>
+  <path d="M514 424V486" fill="none" stroke="#ffb085" stroke-width="3" stroke-dasharray="8 9" marker-end="url(#arrowAccent)"/>
+
+  <g font-family="Inter, system-ui, sans-serif">
+    <text x="104" y="270" fill="#7ee6d0" font-size="14" font-weight="700" letter-spacing="1.6">TRUSTED LAN</text>
+    <text x="104" y="310" fill="#f4f7f6" font-size="24" font-weight="700">Browser</text>
+    <text x="104" y="342" fill="#a9c0c2" font-size="16">桌面 / 手机</text>
+
+    <text x="388" y="232" fill="#4c2830" font-size="14" font-weight="700" letter-spacing="1.6">LOCAL SERVICE</text>
+    <text x="388" y="286" fill="#fffaf4" font-size="30" font-weight="800">PT Media</text>
+    <text x="388" y="322" fill="#fffaf4" font-size="30" font-weight="800">Assistant</text>
+    <text x="388" y="364" fill="#5b3035" font-size="16">发现 · 校验 · 明确确认</text>
+
+    <text x="742" y="270" fill="#7ee6d0" font-size="14" font-weight="700" letter-spacing="1.6">DISCOVERY</text>
+    <text x="742" y="310" fill="#f4f7f6" font-size="24" font-weight="700">Douban lists</text>
+    <text x="742" y="342" fill="#a9c0c2" font-size="16">公开榜单元数据</text>
+
+    <text x="1026" y="270" fill="#7ee6d0" font-size="14" font-weight="700" letter-spacing="1.6">INDEXER</text>
+    <text x="1026" y="310" fill="#f4f7f6" font-size="24" font-weight="700">Prowlarr</text>
+    <text x="1026" y="342" fill="#a9c0c2" font-size="16">已配置的 PT 索引器</text>
+
+    <text x="534" y="534" fill="#7ee6d0" font-size="14" font-weight="700" letter-spacing="1.6">DOWNLOAD TARGET</text>
+    <text x="534" y="566" fill="#f4f7f6" font-size="22" font-weight="700">qBittorrent → configured NAS</text>
+  </g>
+
+  <g font-family="Inter, system-ui, sans-serif" fill="#8ba6ac" font-size="14">
+    <text x="293" y="276">session</text>
+    <text x="675" y="276">read-only query</text>
+    <text x="959" y="276">availability</text>
+    <text x="841" y="445">status only</text>
+    <text x="430" y="468">explicit confirm = true</text>
+  </g>
+</svg>

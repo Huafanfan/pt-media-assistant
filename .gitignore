@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.data/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+*.ips
+*.dmg
+
+# Local visual QA and concept renders can contain machine paths or task names.
+# The public README uses the sanitized SVGs under docs/assets instead.
+docs/design/*.png
