@@ -12,16 +12,24 @@ export const DEFAULT_QBITTORRENT_URL = "http://localhost:8080";
 // the repository. Set PT_MEDIA_NAS_PATH explicitly for another mount layout.
 export const DEFAULT_NAS_PATH = join(homedir(), "Media", "pt");
 export const DEFAULT_SESSION_COOKIE = "pt_media_session";
+export const DEFAULT_NAS_SENTINEL_NAME = ".pt-media-assistant-mounted";
 export const RELEASE_CACHE_TTL_MS = 15 * 60 * 1000;
 export const UPSTREAM_TIMEOUT_MS = 65 * 1000;
+
+export type NasCheckMode = "smbfs" | "sentinel";
 
 export type AppConfig = {
   host: string;
   port: number;
   prowlarrUrl: string;
   prowlarrApiKey?: string;
+  prowlarrProxyToken?: string;
   qbittorrentUrl: string;
   nasPath: string;
+  nasCheckMode: NasCheckMode;
+  nasSentinelName: string;
+  nasSentinelPath?: string;
+  nasStatusPath?: string;
   pairingCode: string;
   sessionTtlMs: number;
   releaseCacheTtlMs: number;
@@ -34,6 +42,16 @@ export type AppConfig = {
 function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim();
   return value || undefined;
+}
+
+function readSecretFile(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const path = readEnv(env, name);
+  if (!path || !path.startsWith("/") || path.includes("\0")) return undefined;
+  try {
+    return readFileSync(path, "utf8").trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parsePort(value: string | undefined): number {
@@ -70,6 +88,8 @@ export function discoverProwlarrApiKey(
 ): string | undefined {
   const fromEnv = readEnv(env, "PROWLARR_API_KEY");
   if (fromEnv) return fromEnv;
+  const fromSecretFile = readSecretFile(env, "PROWLARR_API_KEY_FILE");
+  if (fromSecretFile) return fromSecretFile;
   if (!existsSync(configPath)) return undefined;
   try {
     const xml = readFileSync(configPath, "utf8");
@@ -98,6 +118,20 @@ function parseBoolean(value: string | undefined, fallback = false): boolean {
   return /^(?:1|true|yes|on)$/iu.test(value);
 }
 
+function parseNasCheckMode(value: string | undefined): NasCheckMode {
+  if (!value || value === "smbfs") return "smbfs";
+  if (value === "sentinel") return "sentinel";
+  throw new Error("PT_MEDIA_NAS_CHECK_MODE must be smbfs or sentinel");
+}
+
+function parseNasSentinelName(value: string | undefined): string {
+  const name = value ?? DEFAULT_NAS_SENTINEL_NAME;
+  if (!/^\.[A-Za-z0-9][A-Za-z0-9._-]{0,126}$/u.test(name)) {
+    throw new Error("PT_MEDIA_NAS_SENTINEL must be a hidden file name");
+  }
+  return name;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const configuredOrigin = readEnv(env, "PT_MEDIA_ORIGIN");
   if (configuredOrigin) parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN");
@@ -106,14 +140,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!nasPath.startsWith("/") || nasPath.includes("\0")) {
     throw new Error("PT_MEDIA_NAS_PATH must be an absolute local path");
   }
+  const nasSentinelPath = readEnv(env, "PT_MEDIA_NAS_SENTINEL_PATH");
+  if (nasSentinelPath && (!nasSentinelPath.startsWith("/") || nasSentinelPath.includes("\0"))) {
+    throw new Error("PT_MEDIA_NAS_SENTINEL_PATH must be an absolute local path");
+  }
+  const nasStatusPath = readEnv(env, "PT_MEDIA_NAS_STATUS_PATH");
+  if (nasStatusPath && (!nasStatusPath.startsWith("/") || nasStatusPath.includes("\0"))) {
+    throw new Error("PT_MEDIA_NAS_STATUS_PATH must be an absolute local path");
+  }
 
   return {
     host: readEnv(env, "PT_MEDIA_HOST") ?? DEFAULT_HOST,
     port: parsePort(readEnv(env, "PT_MEDIA_PORT")),
     prowlarrUrl: parseUrl(readEnv(env, "PROWLARR_URL") ?? DEFAULT_PROWLARR_URL, "PROWLARR_URL"),
     prowlarrApiKey: discoverProwlarrApiKey(env),
+    prowlarrProxyToken: readSecretFile(env, "PROWLARR_PROXY_TOKEN_FILE"),
     qbittorrentUrl: parseUrl(readEnv(env, "QBITTORRENT_URL") ?? DEFAULT_QBITTORRENT_URL, "QBITTORRENT_URL"),
     nasPath,
+    nasCheckMode: parseNasCheckMode(readEnv(env, "PT_MEDIA_NAS_CHECK_MODE")),
+    nasSentinelName: parseNasSentinelName(readEnv(env, "PT_MEDIA_NAS_SENTINEL")),
+    ...(nasSentinelPath ? { nasSentinelPath } : {}),
+    ...(nasStatusPath ? { nasStatusPath } : {}),
     pairingCode: parsePairingCode(env),
     sessionTtlMs: 12 * 60 * 60 * 1000,
     releaseCacheTtlMs: RELEASE_CACHE_TTL_MS,

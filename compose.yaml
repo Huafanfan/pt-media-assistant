@@ -1,0 +1,67 @@
+name: pt-media-assistant
+
+services:
+  app:
+    image: pt-media-assistant:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pt-media-assistant
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      PT_MEDIA_HOST: 0.0.0.0
+      PT_MEDIA_PORT: "4178"
+      PT_MEDIA_TRUST_LAN: "1"
+      PT_MEDIA_ALLOW_GRAB: "${PT_MEDIA_ALLOW_GRAB:-0}"
+      PT_MEDIA_ORIGIN: "${PT_MEDIA_ORIGIN:-}"
+      PROWLARR_URL: "${PROWLARR_URL:-http://localhost:9696}"
+      PROWLARR_API_KEY_FILE: /run/secrets/prowlarr_api_key
+      PROWLARR_PROXY_TOKEN_FILE: /run/secrets/prowlarr_proxy_token
+      QBITTORRENT_URL: http://localhost:8080
+      PT_MEDIA_NAS_PATH: "${PT_MEDIA_NAS_PATH:?Set PT_MEDIA_NAS_PATH in .env.orbstack}"
+      PT_MEDIA_NAS_CHECK_MODE: sentinel
+      PT_MEDIA_NAS_SENTINEL: .pt-media-assistant-mounted
+      PT_MEDIA_NAS_SENTINEL_PATH: /run/pt-media-nas-sentinel
+      PT_MEDIA_NAS_STATUS_PATH: /run/pt-media-nas-status
+    secrets:
+      - source: prowlarr_api_key
+        target: prowlarr_api_key
+      - source: prowlarr_proxy_token
+        target: prowlarr_proxy_token
+    volumes:
+      - type: bind
+        source: "${PT_MEDIA_NAS_PATH:?Set PT_MEDIA_NAS_PATH in .env.orbstack}/.pt-media-assistant-mounted"
+        target: /run/pt-media-nas-sentinel
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.data/orbstack/nas-status.json
+        target: /run/pt-media-nas-status
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 20s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  prowlarr_api_key:
+    file: ./.data/orbstack/prowlarr_api_key
+  prowlarr_proxy_token:
+    file: ./.data/orbstack/prowlarr_proxy_token

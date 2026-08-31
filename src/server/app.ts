@@ -169,12 +169,19 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
   const prowlarr = services.prowlarr ?? new ProwlarrClient({
     baseUrl: config.prowlarrUrl,
     apiKey: config.prowlarrApiKey,
+    proxyToken: config.prowlarrProxyToken,
     timeoutMs: config.upstreamTimeoutMs,
   });
   const qbittorrent = services.qbittorrent ?? new QBittorrentClient({
     baseUrl: config.qbittorrentUrl,
   });
-  const nas = services.nas ?? new NasGuard({ targetPath: config.nasPath });
+  const nas = services.nas ?? new NasGuard({
+    targetPath: config.nasPath,
+    checkMode: config.nasCheckMode,
+    sentinelName: config.nasSentinelName,
+    sentinelPath: config.nasSentinelPath,
+    statusFilePath: config.nasStatusPath,
+  });
   const discovery = services.discovery ?? new DiscoveryService(new DoubanClient(), prowlarr);
 
   const app = Fastify({
@@ -238,6 +245,10 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
       decorateReply: true,
     });
   }
+
+  app.get("/api/live", async (_request, reply) => reply
+    .header("Cache-Control", "no-store")
+    .send({ status: "ok" }));
 
   app.get("/api/health", {
     config: { rateLimit: { max: 12, timeWindow: "1 minute" } },

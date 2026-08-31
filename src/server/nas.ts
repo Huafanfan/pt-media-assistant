@@ -4,7 +4,11 @@ import { promisify } from "node:util";
 import { resolve } from "node:path";
 
 import type { NasStorageSummary } from "../shared/contracts.js";
-import { DEFAULT_NAS_PATH } from "./config.js";
+import {
+  DEFAULT_NAS_PATH,
+  DEFAULT_NAS_SENTINEL_NAME,
+  type NasCheckMode,
+} from "./config.js";
 
 const execFile = promisify(nodeExecFile);
 
@@ -21,7 +25,7 @@ export type NasPreflight = {
   directoryExists: boolean;
   ready: boolean;
   mountPoint?: string;
-  reason?: "mount-not-found" | "directory-not-found" | "mount-command-failed";
+  reason?: "mount-not-found" | "directory-not-found" | "mount-command-failed" | "sentinel-not-found" | "status-unavailable";
 };
 
 export type ExecFileLike = (
@@ -40,6 +44,43 @@ export type StatFsLike = {
 };
 
 export type StatFsFunction = (path: string) => Promise<StatFsLike>;
+
+export type NasStatusSnapshot = {
+  ready: boolean;
+  updatedAt: number;
+  totalBytes: number;
+  usedBytes: number;
+  freeBytes: number;
+};
+
+export function parseNasStatusSnapshot(
+  value: string,
+  now = Date.now(),
+  maxAgeMs = 30_000,
+): NasStatusSnapshot | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  const updatedAt = Number(record.updatedAt);
+  const totalBytes = Number(record.totalBytes);
+  const usedBytes = Number(record.usedBytes);
+  const freeBytes = Number(record.freeBytes);
+  if (
+    typeof record.ready !== "boolean"
+    || !Number.isSafeInteger(updatedAt)
+    || updatedAt < now - maxAgeMs
+    || updatedAt > now + 5_000
+    || ![totalBytes, usedBytes, freeBytes].every((item) => Number.isSafeInteger(item) && item >= 0)
+    || usedBytes > totalBytes
+    || freeBytes > totalBytes
+  ) return undefined;
+  return { ready: record.ready, updatedAt, totalBytes, usedBytes, freeBytes };
+}
 
 function unescapeMountPath(value: string): string {
   return value.replace(/\\040/gu, " ").replace(/\\011/gu, "\t").replace(/\\134/gu, "\\");
@@ -82,26 +123,92 @@ export function isPathOnSmbfsMount(output: string, targetPath: string): boolean 
 }
 
 export type NasGuardOptions = {
+  checkMode?: NasCheckMode;
   execFile?: ExecFileLike;
-  stat?: (path: string) => Promise<{ isDirectory(): boolean }>;
+  sentinelName?: string;
+  sentinelPath?: string;
+  statusFilePath?: string;
+  readFile?: (path: string) => Promise<string>;
+  now?: () => number;
+  stat?: (path: string) => Promise<{ isDirectory(): boolean; isFile?(): boolean }>;
   statfs?: StatFsFunction;
   targetPath?: string;
 };
 
 export class NasGuard {
   public readonly targetPath: string;
+  private readonly checkMode: NasCheckMode;
   private readonly runExecFile: ExecFileLike;
-  private readonly stat: (path: string) => Promise<{ isDirectory(): boolean }>;
+  private readonly sentinelName: string;
+  private readonly sentinelPath: string;
+  private readonly statusFilePath?: string;
+  private readonly readFile: (path: string) => Promise<string>;
+  private readonly now: () => number;
+  private readonly stat: (path: string) => Promise<{ isDirectory(): boolean; isFile?(): boolean }>;
   private readonly statfs: StatFsFunction;
 
   public constructor(options: NasGuardOptions = {}) {
     this.targetPath = resolve(options.targetPath ?? DEFAULT_NAS_PATH);
+    this.checkMode = options.checkMode ?? "smbfs";
     this.runExecFile = options.execFile ?? (execFile as unknown as ExecFileLike);
+    this.sentinelName = options.sentinelName ?? DEFAULT_NAS_SENTINEL_NAME;
+    this.sentinelPath = options.sentinelPath
+      ? resolve(options.sentinelPath)
+      : resolve(this.targetPath, this.sentinelName);
+    this.statusFilePath = options.statusFilePath ? resolve(options.statusFilePath) : undefined;
+    this.readFile = options.readFile ?? (async (path: string) => fs.readFile(path, "utf8"));
+    this.now = options.now ?? Date.now;
     this.stat = options.stat ?? (async (path: string) => fs.stat(path));
     this.statfs = options.statfs ?? (async (path: string) => fs.statfs(path, { bigint: true }));
   }
 
+  private async statusSnapshot(): Promise<NasStatusSnapshot | undefined> {
+    if (!this.statusFilePath) return undefined;
+    try {
+      return parseNasStatusSnapshot(await this.readFile(this.statusFilePath), this.now());
+    } catch {
+      return undefined;
+    }
+  }
+
   public async preflight(): Promise<NasPreflight> {
+    if (this.checkMode === "sentinel") {
+      let sentinelExists = false;
+      try {
+        sentinelExists = (await this.stat(this.sentinelPath)).isFile?.() ?? false;
+      } catch {
+        sentinelExists = false;
+      }
+      if (!sentinelExists) {
+        return {
+          path: this.targetPath,
+          mounted: false,
+          directoryExists: false,
+          ready: false,
+          reason: "sentinel-not-found",
+        };
+      }
+      if (this.statusFilePath) {
+        const status = await this.statusSnapshot();
+        if (!status?.ready) {
+          return {
+            path: this.targetPath,
+            mounted: false,
+            directoryExists: false,
+            ready: false,
+            reason: "status-unavailable",
+          };
+        }
+      }
+      return {
+        path: this.targetPath,
+        mounted: true,
+        directoryExists: true,
+        ready: true,
+        mountPoint: this.targetPath,
+      };
+    }
+
     let mountOutput: string;
     try {
       const result = await this.runExecFile("/sbin/mount", [], {
@@ -176,9 +283,20 @@ export class NasGuard {
 
     if (!preflight.ready) return summary;
 
+    if (this.statusFilePath) {
+      const status = await this.statusSnapshot();
+      if (!status?.ready) return { ...summary, mounted: false, ready: false };
+      return {
+        ...summary,
+        totalBytes: status.totalBytes,
+        usedBytes: status.usedBytes,
+        freeBytes: status.freeBytes,
+      };
+    }
+
     let stats: StatFsLike;
     try {
-      stats = await this.statfs(this.targetPath);
+      stats = await this.statfs(this.checkMode === "sentinel" ? this.sentinelPath : this.targetPath);
     } catch {
       // The mount can disappear between the preflight and statfs calls. Keep
       // the mount result for diagnostics but mark the storage as not ready.

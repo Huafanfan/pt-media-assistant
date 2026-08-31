@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+.data
+node_modules
+dist
+coverage
+docs/design/*.png
+*.log
+*.ips
+*.dmg
+.DS_Store

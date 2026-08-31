@@ -13,6 +13,8 @@ const config = {
   prowlarrApiKey: "test-only-key",
   qbittorrentUrl: "http://127.0.0.1:8080",
   nasPath: "/Volumes/YourNAS/pt",
+  nasCheckMode: "smbfs" as const,
+  nasSentinelName: ".pt-media-assistant-mounted",
   pairingCode: "123456",
   sessionTtlMs: 3_600_000,
   releaseCacheTtlMs: 900_000,
@@ -88,6 +90,106 @@ describe("trusted LAN allowlist", () => {
 });
 
 describe("NAS preflight", () => {
+  it("accepts a container bind mount only when its sentinel file exists", async () => {
+    const sentinelPath = "/run/pt-media-nas-sentinel";
+    const stat = vi.fn(async (path: string) => ({
+      isDirectory: () => false,
+      isFile: () => path === sentinelPath,
+    }));
+    const run = vi.fn();
+    const guard = new NasGuard({
+      targetPath: config.nasPath,
+      checkMode: "sentinel",
+      sentinelName: config.nasSentinelName,
+      sentinelPath,
+      execFile: run,
+      stat,
+    });
+
+    await expect(guard.preflight()).resolves.toMatchObject({
+      ready: true,
+      mounted: true,
+      directoryExists: true,
+      mountPoint: config.nasPath,
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("blocks a container bind mount when its sentinel file disappears", async () => {
+    const guard = new NasGuard({
+      targetPath: config.nasPath,
+      checkMode: "sentinel",
+      sentinelName: config.nasSentinelName,
+      sentinelPath: "/run/pt-media-nas-sentinel",
+      stat: async () => { throw new Error("missing"); },
+    });
+
+    await expect(guard.preflight()).resolves.toMatchObject({
+      ready: false,
+      mounted: false,
+      directoryExists: false,
+      reason: "sentinel-not-found",
+    });
+  });
+
+  it("reads container NAS capacity from a fresh host-side status snapshot", async () => {
+    const sentinelPath = "/run/pt-media-nas-sentinel";
+    const statusFilePath = "/run/pt-media-nas-status";
+    const now = 1_800_000_000_000;
+    const statfs = vi.fn();
+    const guard = new NasGuard({
+      targetPath: config.nasPath,
+      checkMode: "sentinel",
+      sentinelPath,
+      statusFilePath,
+      stat: async () => ({ isDirectory: () => false, isFile: () => true }),
+      readFile: async () => JSON.stringify({
+        ready: true,
+        updatedAt: now,
+        totalBytes: 1_000,
+        usedBytes: 400,
+        freeBytes: 500,
+      }),
+      now: () => now,
+      statfs,
+    });
+
+    await expect(guard.storage()).resolves.toMatchObject({
+      path: config.nasPath,
+      mounted: true,
+      ready: true,
+      totalBytes: 1_000,
+      usedBytes: 400,
+      freeBytes: 500,
+    });
+    expect(statfs).not.toHaveBeenCalled();
+  });
+
+  it("blocks container NAS access when the host status snapshot is stale", async () => {
+    const now = 1_800_000_000_000;
+    const guard = new NasGuard({
+      targetPath: config.nasPath,
+      checkMode: "sentinel",
+      sentinelPath: "/run/pt-media-nas-sentinel",
+      statusFilePath: "/run/pt-media-nas-status",
+      stat: async () => ({ isDirectory: () => false, isFile: () => true }),
+      readFile: async () => JSON.stringify({
+        ready: true,
+        updatedAt: now - 60_000,
+        totalBytes: 1_000,
+        usedBytes: 400,
+        freeBytes: 500,
+      }),
+      now: () => now,
+    });
+
+    await expect(guard.preflight()).resolves.toMatchObject({
+      ready: false,
+      mounted: false,
+      reason: "status-unavailable",
+    });
+  });
+
   it("selects the longest smbfs ancestor and checks the directory", async () => {
     const output = [
       "/dev/disk1s1 on / (apfs, local, journaled)",
@@ -179,12 +281,14 @@ describe("Prowlarr search constraints", () => {
       { title: "Movie 1080p", protocol: "torrent", size: 4, seeders: 500 },
       { title: "Movie 4K high-seed", protocol: "torrent", size: 8, seeders: 40 },
     ];
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(releases), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
     const client = new ProwlarrClient({
       baseUrl: "http://127.0.0.1:9696",
-      fetchImpl: vi.fn(async () => new Response(JSON.stringify(releases), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })),
+      proxyToken: "test-only-proxy-token",
+      fetchImpl,
       cache: new ReleaseCache({ idFactory: (() => {
         let index = 0;
         return () => `opaque-release-${String(++index).padStart(8, "0")}`;
@@ -197,6 +301,8 @@ describe("Prowlarr search constraints", () => {
       "Movie 4K high-seed",
       "Movie 2160p low-seed",
     ]);
+    const requestHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
+    expect(requestHeaders.get("X-PT-Proxy-Token")).toBe("test-only-proxy-token");
   });
 });
 
@@ -223,6 +329,10 @@ describe("Fastify authentication and grab guard", () => {
       staticRoot: "/definitely-not-a-static-root",
     });
     const baseHeaders = { host: "localhost:4178", origin: "http://localhost:4178" };
+    const live = await app.inject({ method: "GET", url: "/api/live" });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toEqual({ status: "ok" });
+    expect(live.headers["cache-control"]).toBe("no-store");
     const session = await app.inject({ method: "GET", url: "/api/session", headers: { host: baseHeaders.host }, remoteAddress: "10.0.0.42" });
     expect(session.statusCode).toBe(200);
     expect(session.json().paired).toBe(true);

@@ -215,6 +215,7 @@ function asReleaseArray(value: unknown): JsonObject[] {
 export type ProwlarrClientOptions = {
   baseUrl: string;
   apiKey?: string;
+  proxyToken?: string;
   timeoutMs?: number;
   fetchImpl?: FetchLike;
   cache?: ReleaseCache;
@@ -224,12 +225,14 @@ export class ProwlarrClient {
   public readonly baseUrl: string;
   public readonly cache: ReleaseCache;
   private readonly apiKey?: string;
+  private readonly proxyToken?: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
   public constructor(options: ProwlarrClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/u, "");
     this.apiKey = options.apiKey;
+    this.proxyToken = options.proxyToken;
     this.timeoutMs = Math.max(60_000, options.timeoutMs ?? UPSTREAM_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.cache = options.cache ?? new ReleaseCache();
@@ -244,6 +247,7 @@ export class ProwlarrClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const headers = new Headers(init.headers);
     if (this.apiKey) headers.set("X-Api-Key", this.apiKey);
+    if (this.proxyToken) headers.set("X-PT-Proxy-Token", this.proxyToken);
     try {
       const response = await this.fetchImpl(this.endpoint(path), {
         ...init,

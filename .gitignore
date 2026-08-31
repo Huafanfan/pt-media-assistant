@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.orbstack.example
 coverage/
 *.log
 .DS_Store

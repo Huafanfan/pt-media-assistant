@@ -34,15 +34,30 @@ iPhone browser
 | `PT_MEDIA_PORT` | `4178` |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` |
 | `PROWLARR_API_KEY` | local discovery from Prowlarr config |
+| `PROWLARR_API_KEY_FILE` | optional absolute path to a mounted container secret |
+| `PROWLARR_PROXY_TOKEN_FILE` | optional absolute path to the bridge proxy token secret |
 | `QBITTORRENT_URL` | `http://localhost:8080` |
 | `PT_MEDIA_NAS_PATH` | `/Volumes/YourNAS/pt` |
+| `PT_MEDIA_NAS_CHECK_MODE` | `smbfs`; OrbStack Compose uses `sentinel` |
+| `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` |
+| `PT_MEDIA_NAS_SENTINEL_PATH` | optional single-file mount path inside a container |
+| `PT_MEDIA_NAS_STATUS_PATH` | optional host-generated capacity snapshot inside a container |
 | `PT_MEDIA_TRUST_LAN` | `true`; private/LAN peers receive an automatic session |
 | `PT_MEDIA_PAIRING_CODE` | optional fallback when trusted-LAN mode is disabled |
 | `PT_MEDIA_ALLOW_GRAB` | `false`; must be explicitly set to `1` to permit grabs |
 
+## OrbStack deployment boundary
+
+- `compose.yaml` uses OrbStack host networking for qBittorrent. Native Prowlarr is reached through a launchd proxy bound only to `bridge100`; the proxy requires a second random token, strips it before forwarding, and allowlists only status/search/grab routes.
+- Only a zero-byte sentinel file from the NAS is bind-mounted read-only. This avoids OrbStack VirtioFS stalls observed when creating a whole-directory bind from the macOS SMB mount; qBittorrent remains the only writer.
+- Native macOS mode proves an active `smbfs` ancestor. In container mode the host proxy checks the real directory and sentinel, runs `statfs` on macOS, and refreshes a path-free status snapshot every 10 seconds. The container rejects snapshots older than 30 seconds.
+- The Prowlarr API key is copied into an ignored, mode-0600 local file and exposed to the container as a Compose secret. It is not embedded in the image or environment inspection output.
+- `restart: unless-stopped` recovers process exits and Docker/OrbStack restarts. The image checks the dependency-free `/api/live` endpoint; dependency failures remain `degraded` rather than causing a restart loop.
+
 ## API surface
 
 - `GET /api/health`: minimal public readiness data.
+- `GET /api/live`: dependency-free process liveness used by the container healthcheck.
 - `POST /api/auth/pair`: fallback rate-limited pairing when trusted-LAN mode is disabled.
 - `GET /api/session`: creates a session for an allowlisted LAN peer, then returns its CSRF token.
 - `GET /api/discovery/collections/:collection/items`: returns one sanitized, fixed Douban collection with a maximum of 20 items.
@@ -51,7 +66,7 @@ iPhone browser
 - `POST /api/grab/preview`: revalidates the release, NAS mount, and duplicate state.
 - `POST /api/grab`: repeats all checks and asks Prowlarr to send the release to qBittorrent.
 - `GET /api/torrents`: returns sanitized qBittorrent status.
-- `GET /api/storage`: after a fresh smbfs preflight, returns JSON-safe NAS total, used, and user-available bytes.
+- `GET /api/storage`: after a fresh native smbfs or container sentinel/status preflight, returns JSON-safe NAS total, used, and user-available bytes.
 
 ## Deliberate MVP constraints
 

@@ -56,6 +56,40 @@
 - 豆瓣集合 id 是服务端固定映射，客户端不能提交任意上游 URL。
 - 下载接口需要有效会话、来源校验、最新 NAS 挂载检查、不透明 release id，以及 `confirm: true`。
 
+## 推荐：OrbStack 常驻部署
+
+macOS 上推荐使用 OrbStack + Docker Compose。容器使用 `restart: unless-stopped`：应用进程异常退出、Docker 引擎重启或 OrbStack 随登录启动后，服务都会自动恢复。镜像自带健康检查，运行时采用非 root 用户、只读根文件系统、最小权限和有限日志。
+
+```bash
+# 首次部署：替换成自己的已挂载 NAS 目录。
+PT_MEDIA_NAS_PATH=/Volumes/YourNAS/pt \
+PT_MEDIA_ALLOW_GRAB=0 \
+./scripts/orbstack-deploy.sh
+```
+
+部署脚本会：
+
+- 确认目标目录确实位于活动的 `smbfs` 挂载上；
+- 从本机 Prowlarr 配置读取 API key，只写入被 Git 忽略的 0600 secret 文件；
+- 安装一个只绑定 OrbStack 专用网桥的 launchd 代理；代理还要求独立随机令牌，并只允许状态、搜索和抓取三个 Prowlarr API；
+- 在 NAS 上创建空的 `.pt-media-assistant-mounted` 哨兵文件；
+- 只把 NAS 上的空哨兵文件以只读方式绑定进容器；
+- 每 10 秒在 macOS 侧生成不含路径的 NAS 容量快照，容器拒绝超过 30 秒的旧数据；
+- 构建并后台启动 `pt-media-assistant` 容器。
+
+容器通过 OrbStack host networking 直接访问 qBittorrent 的 `localhost:8080`。Prowlarr 经 bridge-only 代理访问，避免当前 macOS/OrbStack 组合中原生 Prowlarr 的回环转发卡顿。OrbStack 绑定整个 SMB 目录也可能卡住，所以容器只看到一个空哨兵文件和一个无路径容量快照，不读取媒体内容。SMB 断开、代理停止或快照过期时，应用都会把 NAS 标记为不可用并拒绝下载。
+
+常用维护命令：
+
+```bash
+docker compose --env-file .env.orbstack ps
+docker logs --tail 100 pt-media-assistant
+docker compose --env-file .env.orbstack restart
+docker compose --env-file .env.orbstack down
+```
+
+`.env.orbstack`、`.data/orbstack/`、本机 LaunchAgent 和 NAS 哨兵都只存在本机，不会进入镜像或 Git 历史。若要正式允许下载，把本机 `.env.orbstack` 中的 `PT_MEDIA_ALLOW_GRAB` 改为 `1`，再重新运行部署脚本。
+
 ## 快速开始
 
 ### 前置条件
@@ -92,8 +126,14 @@ npm start
 | `PT_MEDIA_PORT` | `4178` | Web 服务端口 |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr 地址 |
 | `PROWLARR_API_KEY` | 留空 | 可选；留空时从本机配置发现 |
+| `PROWLARR_API_KEY_FILE` | 留空 | 可选；从容器 secret 文件读取 API key |
+| `PROWLARR_PROXY_TOKEN_FILE` | 留空 | 可选；读取 bridge-only 代理的独立令牌 |
 | `QBITTORRENT_URL` | `http://localhost:8080` | qBittorrent Web API 地址 |
 | `PT_MEDIA_NAS_PATH` | `/Volumes/YourNAS/pt` | 下载目标目录 |
+| `PT_MEDIA_NAS_CHECK_MODE` | `smbfs` | 原生模式检查 smbfs；容器使用 `sentinel` |
+| `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` | 容器 NAS 安全哨兵文件名 |
+| `PT_MEDIA_NAS_SENTINEL_PATH` | 留空 | 容器内单文件绑定路径 |
+| `PT_MEDIA_NAS_STATUS_PATH` | 留空 | 容器内 host-side 容量快照路径 |
 | `PT_MEDIA_TRUST_LAN` | `true` | 可信局域网自动建立会话 |
 | `PT_MEDIA_PAIRING_CODE` | 留空 | 关闭可信局域网模式时的六位配对码 |
 | `PT_MEDIA_ALLOW_GRAB` | `false` | 下载总开关；必须显式设为 `1` 才允许抓取 |
@@ -106,6 +146,7 @@ npm start
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 服务、Prowlarr、qBittorrent 和 NAS 的健康状态 |
+| `GET` | `/api/live` | 无上游依赖的容器存活检查 |
 | `GET` | `/api/session` | 当前局域网会话状态 |
 | `GET` | `/api/discovery/collections/:collection/items` | 获取一个固定豆瓣集合的条目 |
 | `GET` | `/api/discovery/collections/:collection/items/:itemId/releases` | 查询条目的可用片源 |
@@ -143,6 +184,9 @@ docs/
   ARCHITECTURE.md
   design/       设计规格与本地视觉稿
   assets/       README 使用的脱敏 SVG 配图
+Dockerfile      多阶段、非 root 生产镜像
+compose.yaml   OrbStack 常驻服务与自动重启策略
+scripts/       本机安全部署脚本
 ```
 
 ## 有意保留的限制

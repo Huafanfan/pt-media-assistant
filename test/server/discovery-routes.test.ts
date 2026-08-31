@@ -9,6 +9,8 @@ const config = {
   prowlarrApiKey: "test-only-key",
   qbittorrentUrl: "http://127.0.0.1:8080",
   nasPath: "/Volumes/YourNAS/pt",
+  nasCheckMode: "smbfs" as const,
+  nasSentinelName: ".pt-media-assistant-mounted",
   pairingCode: "123456",
   sessionTtlMs: 3_600_000,
   releaseCacheTtlMs: 900_000,
