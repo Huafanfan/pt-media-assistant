@@ -16,8 +16,10 @@ import {
 } from "./douban.js";
 
 export const PT_QUERY_MIN_INTERVAL_MS = 1_200;
-export const AVAILABLE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-export const UNAVAILABLE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+export const RELEASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// Kept as aliases for callers that used the previous status-specific names.
+export const AVAILABLE_CACHE_TTL_MS = RELEASE_CACHE_TTL_MS;
+export const UNAVAILABLE_CACHE_TTL_MS = RELEASE_CACHE_TTL_MS;
 
 export class DiscoveryItemNotFoundError extends Error {
   public readonly collection: DiscoveryCollectionId | string;
@@ -47,6 +49,10 @@ export type DiscoveryServiceOptions = {
   sleep?: (milliseconds: number) => Promise<void>;
   minIntervalMs?: number;
   collectionLimit?: number;
+};
+
+export type DiscoveryReleaseQueryOptions = {
+  forceRefresh?: boolean;
 };
 
 type CachedReleases = {
@@ -213,18 +219,21 @@ export class DiscoveryService {
     collection: DiscoveryCollectionId | string,
     itemId: string,
     limit = DEFAULT_DISCOVERY_LIMIT,
+    options: DiscoveryReleaseQueryOptions = {},
   ): Promise<DiscoveryReleaseResponse> {
     if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
     const boundedLimit = normalizeDiscoveryLimit(limit);
     const normalizedItemId = String(itemId);
     const key = `${collection}:${normalizedItemId}:${boundedLimit}`;
     const cached = this.releaseCache.get(key);
-    if (cached && cached.expiresAt > this.now()) return cloneReleaseResponse(cached.response, boundedLimit);
+    if (!options.forceRefresh && cached && cached.expiresAt > this.now()) {
+      return cloneReleaseResponse(cached.response, boundedLimit);
+    }
 
     const existing = this.pendingReleases.get(key);
     if (existing) return existing.then((response) => cloneReleaseResponse(response, boundedLimit));
 
-    const operation = this.queryReleases(collection, normalizedItemId, boundedLimit, key, cached);
+    const operation = this.queryReleases(collection, normalizedItemId, boundedLimit, key);
     this.pendingReleases.set(key, operation);
     try {
       const response = await operation;
@@ -243,7 +252,6 @@ export class DiscoveryService {
     itemId: string,
     limit: number,
     key: string,
-    oldCache?: CachedReleases,
   ): Promise<DiscoveryReleaseResponse> {
     // Fetch the collection only after a release-cache miss.  The item lookup
     // is intentionally done against the allowlisted Douban response rather
@@ -276,8 +284,7 @@ export class DiscoveryService {
       total: releases.length,
       releases: releases.slice(0, limit),
     };
-    const ttl = status === "unavailable" ? UNAVAILABLE_CACHE_TTL_MS : AVAILABLE_CACHE_TTL_MS;
-    this.releaseCache.set(key, { response, expiresAt: this.now() + ttl });
+    this.releaseCache.set(key, { response, expiresAt: this.now() + RELEASE_CACHE_TTL_MS });
     return response;
   }
 

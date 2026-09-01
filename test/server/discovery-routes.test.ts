@@ -66,7 +66,10 @@ async function trustedSession(app: Awaited<ReturnType<typeof createApp>>) {
     headers: { host: "localhost:4178" },
     remoteAddress: "10.0.0.42"
   });
-  return String(response.headers["set-cookie"]).split(";", 1)[0];
+  return {
+    cookie: String(response.headers["set-cookie"]).split(";", 1)[0],
+    csrfToken: String(response.json().csrfToken)
+  };
 }
 
 describe("discovery routes", () => {
@@ -92,11 +95,11 @@ describe("discovery routes", () => {
     expect(unauthorized.statusCode).toBe(401);
     expect(list).not.toHaveBeenCalled();
 
-    const cookie = await trustedSession(app);
+    const session = await trustedSession(app);
     const response = await app.inject({
       method: "GET",
       url: "/api/discovery/collections/movie-hot/items",
-      headers: { host: "localhost:4178", cookie }
+      headers: { host: "localhost:4178", cookie: session.cookie }
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
@@ -120,21 +123,42 @@ describe("discovery routes", () => {
       discovery: { list: vi.fn(), getReleases },
       staticRoot: "/definitely-not-a-static-root"
     });
-    const cookie = await trustedSession(app);
+    const session = await trustedSession(app);
 
     const response = await app.inject({
       method: "GET",
       url: `/api/discovery/collections/movie-hot/items/${item.id}/releases`,
-      headers: { host: "localhost:4178", cookie }
+      headers: { host: "localhost:4178", cookie: session.cookie }
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ itemId: item.id, status: "available" });
     expect(getReleases).toHaveBeenCalledWith("movie-hot", item.id, 10);
 
+    const refreshed = await app.inject({
+      method: "POST",
+      url: `/api/discovery/collections/movie-hot/items/${item.id}/releases/refresh`,
+      headers: {
+        host: "localhost:4178",
+        cookie: session.cookie,
+        origin: "http://localhost:4178",
+        "x-csrf-token": session.csrfToken
+      }
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(getReleases).toHaveBeenNthCalledWith(2, "movie-hot", item.id, 10, { forceRefresh: true });
+
+    const csrfFailure = await app.inject({
+      method: "POST",
+      url: `/api/discovery/collections/movie-hot/items/${item.id}/releases/refresh`,
+      headers: { host: "localhost:4178", cookie: session.cookie, origin: "http://localhost:4178" }
+    });
+    expect(csrfFailure.statusCode).toBe(403);
+    expect(getReleases).toHaveBeenCalledTimes(2);
+
     const invalid = await app.inject({
       method: "GET",
       url: "/api/discovery/collections/not-real/items/not-numeric/releases",
-      headers: { host: "localhost:4178", cookie }
+      headers: { host: "localhost:4178", cookie: session.cookie }
     });
     expect(invalid.statusCode).toBe(400);
 
@@ -142,7 +166,7 @@ describe("discovery routes", () => {
     const missing = await app.inject({
       method: "GET",
       url: "/api/discovery/collections/movie-hot/items/9999/releases",
-      headers: { host: "localhost:4178", cookie }
+      headers: { host: "localhost:4178", cookie: session.cookie }
     });
     expect(missing.statusCode).toBe(404);
     expect(missing.json().code).toBe("DISCOVERY_ITEM_NOT_FOUND");

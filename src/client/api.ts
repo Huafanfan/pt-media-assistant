@@ -333,6 +333,11 @@ export type ApiClient = {
     itemId: string,
     csrfToken: string
   ): Promise<DiscoveryReleaseResponse>;
+  refreshDiscoveryReleases(
+    collection: DiscoveryCollectionId,
+    itemId: string,
+    csrfToken: string
+  ): Promise<DiscoveryReleaseResponse>;
   grabPreview(releaseId: string, csrfToken: string): Promise<GrabPreviewResponse>;
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
@@ -400,6 +405,16 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
         await requestJson<unknown>(
           `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases`,
           { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async refreshDiscoveryReleases(collection, itemId, csrfToken) {
+      return normalizeDiscoveryReleases(
+        await requestJson<unknown>(
+          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases/refresh`,
+          { method: "POST", headers: withCsrf(csrfToken) },
           fetchImpl
         )
       );

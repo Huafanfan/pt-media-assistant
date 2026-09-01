@@ -1,5 +1,5 @@
-import { CircleUserRound, Menu, MonitorSmartphone, X } from "lucide-react";
-import { useState } from "react";
+import { RefreshCw } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ServiceHealth } from "../../shared/contracts";
 
 function serviceHealthText(health: ServiceHealth | null, paired: boolean): string {
@@ -25,63 +25,34 @@ export function AppHeader({
   health,
   paired,
   healthError,
-  onRefresh
+  onRefresh,
+  runtimeStatus
 }: {
   health: ServiceHealth | null;
   paired: boolean;
   healthError?: string | null;
   onRefresh?: () => void;
+  runtimeStatus?: ReactNode;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const isHealthy = paired && health?.status === "ok";
   const statusText = serviceHealthText(health, paired);
 
   return (
     <header className="app-header">
-      <button
-        className="icon-button menu-button"
-        type="button"
-        aria-label={menuOpen ? "关闭导航" : "打开导航"}
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        {menuOpen ? <X size={25} aria-hidden="true" /> : <Menu size={25} aria-hidden="true" />}
-      </button>
-
       <div className="brand-lockup">
         <h1>片源助手</h1>
         <p className={`service-status ${isHealthy ? "is-healthy" : "is-degraded"}`}>
           <span className="status-dot" aria-hidden="true" />
           <span>{statusText}</span>
-        </p>
-        {healthError ? <span className="sr-only">{healthError}</span> : null}
-      </div>
-
-      <button
-        className="device-button"
-        type="button"
-        aria-label="查看设备连接状态"
-        aria-pressed={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        <span className="device-icon-wrap">
-          {paired ? <MonitorSmartphone size={25} aria-hidden="true" /> : <CircleUserRound size={25} aria-hidden="true" />}
-          <span className={`device-dot ${isHealthy ? "is-healthy" : ""}`} aria-hidden="true" />
-        </span>
-      </button>
-
-      {menuOpen ? (
-        <div className="header-menu" role="dialog" aria-label="设备状态">
-          <p className="eyebrow">当前连接</p>
-          <p className="header-menu-status">{statusText}</p>
-          {health?.version ? <p className="header-menu-meta">服务版本 {health.version}</p> : null}
           {onRefresh ? (
-            <button className="text-button" type="button" onClick={onRefresh}>
-              刷新状态
+            <button className="service-status-refresh" type="button" onClick={onRefresh} aria-label="刷新状态">
+              <RefreshCw size={14} aria-hidden="true" />
             </button>
           ) : null}
-        </div>
-      ) : null}
+        </p>
+        {runtimeStatus}
+        {healthError ? <span className="sr-only">{healthError}</span> : null}
+      </div>
     </header>
   );
 }

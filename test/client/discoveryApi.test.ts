@@ -72,9 +72,30 @@ describe("discovery API client", () => {
     const client = createApiClient(fetchImpl as typeof fetch);
 
     const result = await client.getDiscoveryReleases("movie-hot", "36808876", "csrf-test");
+    const refreshed = await client.refreshDiscoveryReleases("movie-hot", "36808876", "csrf-test");
 
     expect(result.status).toBe("available");
     expect(result.releases[0]).toMatchObject({ id: "release-opaque-123", seeders: 8, freeleech: true });
     expect(JSON.stringify(result)).not.toContain("private.invalid");
+    expect(refreshed.status).toBe("available");
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "/api/discovery/collections/movie-hot/items/36808876/releases",
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-test" })
+      })
+    );
+    const calls = fetchImpl.mock.calls as unknown as Array<[string, RequestInit | undefined]>;
+    expect(calls[0]?.[1]).not.toHaveProperty("method");
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "/api/discovery/collections/movie-hot/items/36808876/releases/refresh",
+      expect.objectContaining({
+        credentials: "same-origin",
+        method: "POST",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-test" })
+      })
+    );
   });
 });

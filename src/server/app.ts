@@ -365,6 +365,35 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     }
   });
 
+  app.post("/api/discovery/collections/:collection/items/:itemId/releases/refresh", {
+    config: { rateLimit: { max: 10, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    let params: z.infer<typeof discoveryItemParamsSchema>;
+    let query: z.infer<typeof discoveryQuerySchema>;
+    try {
+      params = discoveryItemParamsSchema.parse(request.params);
+      query = discoveryQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryReleaseResponse = await discovery.getReleases(
+        params.collection,
+        params.itemId,
+        query.limit ?? 10,
+        { forceRefresh: true },
+      );
+      return reply.send(response);
+    } catch (error) {
+      if (error instanceof DiscoveryItemNotFoundError) {
+        return sendError(reply, 404, "Discovery item not found", "DISCOVERY_ITEM_NOT_FOUND");
+      }
+      return genericUpstreamError(reply);
+    }
+  });
+
   app.post("/api/search", {
     config: { rateLimit: { max: 20, timeWindow: "10 minutes" } },
   }, async (request, reply) => {

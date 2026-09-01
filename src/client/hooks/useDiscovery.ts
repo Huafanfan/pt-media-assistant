@@ -29,6 +29,7 @@ export type DiscoveryState = {
   setCollection: (collection: DiscoveryCollectionId) => void;
   retryCollection: () => void;
   ensureAvailability: (item: DiscoveryItem) => Promise<DiscoveryReleaseResponse | null>;
+  refreshAvailability: (item: DiscoveryItem) => Promise<DiscoveryReleaseResponse | null>;
 };
 
 export function useDiscovery(
@@ -45,7 +46,10 @@ export function useDiscovery(
   const [availabilityByKey, setAvailabilityByKey] = useState<Record<string, DiscoveryReleaseResponse>>({});
   const [checkingKeys, setCheckingKeys] = useState<Set<string>>(() => new Set());
   const availabilityRef = useRef(availabilityByKey);
-  const inFlightRef = useRef(new Map<string, Promise<DiscoveryReleaseResponse | null>>());
+  const inFlightRef = useRef(new Map<string, {
+    forceRefresh: boolean;
+    promise: Promise<DiscoveryReleaseResponse | null>;
+  }>());
   const mountedRef = useRef(true);
 
   availabilityRef.current = availabilityByKey;
@@ -91,13 +95,16 @@ export function useDiscovery(
     };
   }, [client, collection, csrfToken, enabled, refreshRevision]);
 
-  const requestAvailability = useCallback((item: DiscoveryItem): Promise<DiscoveryReleaseResponse | null> => {
+  const requestAvailability = useCallback((
+    item: DiscoveryItem,
+    forceRefresh = false
+  ): Promise<DiscoveryReleaseResponse | null> => {
     if (!enabled || !csrfToken) return Promise.resolve(null);
     const key = itemKey(collection, item.id);
-    const cached = availabilityRef.current[key];
-    if (cached) return Promise.resolve(cached);
     const existing = inFlightRef.current.get(key);
-    if (existing) return existing;
+    if (existing && (!forceRefresh || existing.forceRefresh)) return existing.promise;
+    const cached = availabilityRef.current[key];
+    if (!forceRefresh && cached) return Promise.resolve(cached);
 
     setCheckingKeys((current) => {
       const next = new Set(current);
@@ -105,7 +112,11 @@ export function useDiscovery(
       return next;
     });
 
-    const request = client.getDiscoveryReleases(collection, item.id, csrfToken)
+    const request = (existing?.promise ?? Promise.resolve(null))
+      .catch(() => null)
+      .then(() => forceRefresh
+        ? client.refreshDiscoveryReleases(collection, item.id, csrfToken)
+        : client.getDiscoveryReleases(collection, item.id, csrfToken))
       .then((next) => {
         if (mountedRef.current) {
           availabilityRef.current = { ...availabilityRef.current, [key]: next };
@@ -115,18 +126,25 @@ export function useDiscovery(
       })
       .catch(() => null)
       .finally(() => {
-        inFlightRef.current.delete(key);
-        if (mountedRef.current) {
-          setCheckingKeys((current) => {
-            const next = new Set(current);
-            next.delete(key);
-            return next;
-          });
+        if (inFlightRef.current.get(key)?.promise === request) {
+          inFlightRef.current.delete(key);
+          if (mountedRef.current) {
+            setCheckingKeys((current) => {
+              const next = new Set(current);
+              next.delete(key);
+              return next;
+            });
+          }
         }
       });
-    inFlightRef.current.set(key, request);
+    inFlightRef.current.set(key, { forceRefresh, promise: request });
     return request;
   }, [client, collection, csrfToken, enabled]);
+
+  const refreshAvailability = useCallback(
+    (item: DiscoveryItem) => requestAvailability(item, true),
+    [requestAvailability]
+  );
 
   const items = response?.collection === collection ? response.items : [];
 
@@ -174,6 +192,7 @@ export function useDiscovery(
     checkingIds,
     setCollection,
     retryCollection: () => setRefreshRevision((current) => current + 1),
-    ensureAvailability: requestAvailability
+    ensureAvailability: requestAvailability,
+    refreshAvailability
   };
 }

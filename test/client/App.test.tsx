@@ -67,6 +67,14 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
       total: 1,
       releases: [release]
     }),
+    refreshDiscoveryReleases: vi.fn().mockResolvedValue({
+      itemId: discoveryItem.id,
+      query: "The Odyssey 2026",
+      status: "available" as const,
+      checkedAt: "2026-08-29T00:00:02.000Z",
+      total: 1,
+      releases: [release]
+    }),
     grabPreview: vi.fn().mockResolvedValue({
       release,
       destination: "/Volumes/YourNAS/pt",
@@ -136,6 +144,23 @@ describe("片源助手客户端", () => {
     expect(client.grab).not.toHaveBeenCalled();
   });
 
+  it("uses the forced refresh API for discovery inspector retries", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /奥德赛，第 1 名/ }));
+    await screen.findByText(release.title);
+    await user.click(screen.getByRole("button", { name: "重新检查片源" }));
+
+    await waitFor(() => expect(client.refreshDiscoveryReleases).toHaveBeenCalledWith(
+      "movie-hot",
+      discoveryItem.id,
+      "csrf-test"
+    ));
+    expect(client.getDiscoveryReleases).toHaveBeenCalledWith("movie-hot", discoveryItem.id, "csrf-test");
+  });
+
   it("renders a user query, deterministic assistant message, and release row", async () => {
     const client = makeClient();
     render(<App client={client} />);
@@ -197,7 +222,40 @@ describe("片源助手客户端", () => {
     expect(client.grab).not.toHaveBeenCalled();
   });
 
-  it("shows NAS remaining space and live qBittorrent progress", async () => {
+  it("shows header health and runtime rows and refreshes runtime status", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("TJUPT · qBittorrent · NAS 已连接")).not.toBeNull();
+    expect(await screen.findByText(/1\.4 TB/)).not.toBeNull();
+    expect(screen.getByText(/NAS 剩余/)).not.toBeNull();
+    expect(screen.getByText(/下载中/)).not.toBeNull();
+
+    vi.mocked(client.getStorage).mockClear();
+    vi.mocked(client.getTorrents).mockClear();
+
+    await user.click(screen.getByRole("button", { name: "刷新状态" }));
+    await waitFor(() => {
+      expect(client.getStorage).toHaveBeenCalledWith("csrf-test");
+      expect(client.getTorrents).toHaveBeenCalledWith("csrf-test");
+    });
+  });
+
+  it("refreshes status without replacing the current workspace", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("tab", { name: "热门电影" })).not.toBeNull();
+
+    vi.mocked(client.getSession).mockImplementation(() => new Promise(() => undefined));
+    await user.click(screen.getByRole("button", { name: "刷新状态" }));
+
+    expect(screen.getByRole("tab", { name: "热门电影" })).not.toBeNull();
+  });
+
+  it("shows compact runtime status without opening the detail panel", async () => {
     const client = makeClient();
     vi.mocked(client.getTorrents).mockResolvedValue([{
       hash: "torrent-hash",
@@ -212,9 +270,8 @@ describe("片源助手客户端", () => {
     }]);
     render(<App client={client} />);
 
-    expect(await screen.findByText("剩余 1.4 TB")).not.toBeNull();
-    expect(await screen.findByText("72%")).not.toBeNull();
-    expect(screen.getByText("↓ 12.4 MB/s")).not.toBeNull();
-    expect(screen.getByText("剩余 18 分钟")).not.toBeNull();
+    expect(await screen.findByText("NAS 剩余 1.4 TB")).not.toBeNull();
+    expect(await screen.findByText("下载中 1")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "下载活动" })).not.toBeInTheDocument();
   });
 });

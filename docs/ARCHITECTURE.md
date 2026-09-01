@@ -24,7 +24,7 @@ iPhone browser
 - Grab requests require a session, exact-origin/CSRF checks, a fresh NAS mount check, an opaque release ID, and `confirm: true`.
 - qBittorrent responses are reduced to safe status fields. Tracker URLs and passkeys are never returned.
 - Douban collection ids are closed server-side mappings. The browser cannot provide an upstream URL; Douban cookies and image URLs are never accepted or returned.
-- Discovery availability calls reuse Prowlarr's opaque release cache and are read-only. They cannot reach the grab path.
+- Discovery availability calls reuse a server-side availability cache alongside Prowlarr's opaque release cache and are read-only. They cannot reach the grab path. An explicit refresh is a separate CSRF-protected action and still cannot reach the grab path.
 
 ## Runtime configuration
 
@@ -61,7 +61,8 @@ iPhone browser
 - `POST /api/auth/pair`: fallback rate-limited pairing when trusted-LAN mode is disabled.
 - `GET /api/session`: creates a session for an allowlisted LAN peer, then returns its CSRF token.
 - `GET /api/discovery/collections/:collection/items`: returns one sanitized, fixed Douban collection with a maximum of 20 items.
-- `GET /api/discovery/collections/:collection/items/:itemId/releases`: looks up the server-known item, performs a throttled Prowlarr search, and returns sanitized candidate releases.
+- `GET /api/discovery/collections/:collection/items/:itemId/releases`: looks up the server-known item, returns the server-side cached availability result when it is fresh, and otherwise performs a throttled Prowlarr search.
+- `POST /api/discovery/collections/:collection/items/:itemId/releases/refresh`: explicitly bypasses the availability cache, performs a throttled Prowlarr search, and replaces the server-side result.
 - `POST /api/search`: validates a natural-language query, searches Prowlarr, stores raw releases server-side, and returns sanitized summaries.
 - `POST /api/grab/preview`: revalidates the release, NAS mount, and duplicate state.
 - `POST /api/grab`: repeats all checks and asks Prowlarr to send the release to qBittorrent.
@@ -71,7 +72,7 @@ iPhone browser
 ## Deliberate MVP constraints
 
 - Discovery uses public, undocumented Douban web collection data behind a dedicated adapter, a two-hour cache, in-flight coalescing, and stale-cache fallback. Upstream shape changes can degrade discovery without affecting manual search or downloading.
-- PT discovery checks are globally serialized with a 1.2-second minimum start interval. Positive/possible results cache for 12 hours and empty results for 2 hours.
+- PT discovery checks are globally serialized with a 1.2-second minimum start interval. Availability results are cached in the backend process per collection, item, and limit for up to 24 hours, including empty results. The browser does not decide the cache lifetime; the explicit refresh action is available when a user wants a newer result.
 - The recommendation surface is deterministic public ranking data, not a personalized Douban login or external LLM integration.
 - LAN sessions are in memory and expire when the server restarts.
 - The client polls sanitized torrent and storage status every 15 seconds while the document is visible, pauses automatic requests while hidden, and refreshes once immediately when visibility returns. It never receives tracker URLs, passkeys, or raw mount output.

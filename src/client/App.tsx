@@ -9,7 +9,7 @@ import { ModeSwitch, type AppMode } from "./components/ModeSwitch";
 import { PairingGate } from "./components/PairingGate";
 import { QueryComposer } from "./components/QueryComposer";
 import { ReleaseList } from "./components/ReleaseList";
-import { RuntimeSummary } from "./components/RuntimeSummary";
+import { RuntimeStatusBar } from "./components/RuntimeSummary";
 import { ErrorMessage, LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
@@ -62,6 +62,17 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const discovery = useDiscovery(client, csrfToken, paired);
   const [selectedDiscoveryItem, setSelectedDiscoveryItem] = useState<DiscoveryItem | null>(null);
   const [discoveryInspectorError, setDiscoveryInspectorError] = useState<string | null>(null);
+  const runtimeStatus = paired ? (
+    <RuntimeStatusBar
+      storage={runtime.storage}
+      storageLoading={runtime.storageLoading}
+      torrents={runtime.torrents}
+    />
+  ) : null;
+  const refreshAllStatus = () => {
+    void Promise.allSettled([bootstrap.refreshHealth(), runtime.refresh()]);
+  };
+  const hasInspector = Boolean(selection || selectedDiscoveryItem);
 
   const sessionFailure = !bootstrap.loading && !session && bootstrap.sessionError;
   const pairingView = !bootstrap.loading && !sessionFailure && !paired;
@@ -170,6 +181,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const resetReleaseSelection = () => {
     if (confirmLoading) return;
     setSelection(null);
+    setInspectorExpanded(false);
     setSelectionError(null);
     setGrabResult(null);
   };
@@ -208,7 +220,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const retryDiscoveryItem = () => {
     if (!selectedDiscoveryItem) return;
     setDiscoveryInspectorError(null);
-    void discovery.ensureAvailability(selectedDiscoveryItem).then((result) => {
+    void discovery.refreshAvailability(selectedDiscoveryItem).then((result) => {
       if (!result) setDiscoveryInspectorError("这次片源检查没有完成，请稍后重试。");
     });
   };
@@ -281,8 +293,14 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
   return (
     <div className="app-shell">
-      <AppHeader health={bootstrap.health} paired={paired} healthError={healthError} onRefresh={() => void bootstrap.reload()} />
-      <main className={`app-layout ${mode === "discover" ? "is-discovery" : "search-shell"}`}>
+      <AppHeader
+        health={bootstrap.health}
+        paired={paired}
+        healthError={healthError}
+        onRefresh={refreshAllStatus}
+        runtimeStatus={runtimeStatus}
+      />
+      <main className={`app-layout ${mode === "discover" ? "is-discovery" : "search-shell"} ${hasInspector ? "has-inspector" : "no-inspector"}`}>
         {mode === "discover" ? (
           <>
             <section className="discovery-workspace" aria-label="发现影视">
@@ -344,32 +362,8 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                   }}
                   onRetry={retryDiscoveryItem}
                 />
-                <RuntimeSummary
-                  storage={runtime.storage}
-                  torrents={runtime.torrents}
-                  loading={runtime.storageLoading || runtime.torrentsLoading}
-                  onRefresh={() => void runtime.refresh()}
-                />
               </div>
-            ) : (
-              <SelectionPanel
-                selection={null}
-                previewError={null}
-                expanded={inspectorExpanded}
-                confirmLoading={false}
-                grabResult={null}
-                storage={runtime.storage}
-                storageLoading={runtime.storageLoading}
-                storageError={runtime.storageError}
-                torrents={runtime.torrents}
-                torrentsLoading={runtime.torrentsLoading}
-                torrentsError={runtime.torrentsError}
-                onToggle={() => setInspectorExpanded((current) => !current)}
-                onCancel={handleCancel}
-                onConfirm={handleConfirm}
-                onRefreshRuntime={() => void runtime.refresh()}
-              />
-            )}
+            ) : null}
           </>
         ) : (
           <>
@@ -397,23 +391,25 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
               </div>
             </aside>
 
-            <SelectionPanel
-              selection={selection}
-              previewError={selectionError}
-              expanded={inspectorExpanded}
-              confirmLoading={confirmLoading}
-              grabResult={grabResult}
-              storage={runtime.storage}
-              storageLoading={runtime.storageLoading}
-              storageError={runtime.storageError}
-              torrents={runtime.torrents}
-              torrentsLoading={runtime.torrentsLoading}
-              torrentsError={runtime.torrentsError}
-              onToggle={() => setInspectorExpanded((current) => !current)}
-              onCancel={handleCancel}
-              onConfirm={handleConfirm}
-              onRefreshRuntime={() => void runtime.refresh()}
-            />
+            {selection ? (
+              <SelectionPanel
+                selection={selection}
+                previewError={selectionError}
+                expanded={inspectorExpanded}
+                confirmLoading={confirmLoading}
+                grabResult={grabResult}
+                storage={runtime.storage}
+                storageLoading={runtime.storageLoading}
+                storageError={runtime.storageError}
+                torrents={runtime.torrents}
+                torrentsLoading={runtime.torrentsLoading}
+                torrentsError={runtime.torrentsError}
+                onToggle={() => setInspectorExpanded((current) => !current)}
+                onCancel={handleCancel}
+                onConfirm={handleConfirm}
+                onRefreshRuntime={() => void runtime.refresh()}
+              />
+            ) : null}
 
             <div className="composer-dock">
               <QueryComposer

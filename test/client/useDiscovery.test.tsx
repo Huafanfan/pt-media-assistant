@@ -58,8 +58,12 @@ function releaseResponse(itemId: string): DiscoveryReleaseResponse {
 function makeClient() {
   const getDiscoveryCollection = vi.fn(async (collection: DiscoveryCollectionId) => collectionResponse(collection));
   const getDiscoveryReleases = vi.fn(async (_collection: DiscoveryCollectionId, itemId: string) => releaseResponse(itemId));
-  const client = { getDiscoveryCollection, getDiscoveryReleases } as unknown as ApiClient;
-  return { client, getDiscoveryCollection, getDiscoveryReleases };
+  const refreshDiscoveryReleases = vi.fn(async (_collection: DiscoveryCollectionId, itemId: string) => ({
+    ...releaseResponse(itemId),
+    checkedAt: "2026-08-29T00:00:02.000Z"
+  }));
+  const client = { getDiscoveryCollection, getDiscoveryReleases, refreshDiscoveryReleases } as unknown as ApiClient;
+  return { client, getDiscoveryCollection, getDiscoveryReleases, refreshDiscoveryReleases };
 }
 
 afterEach(() => {
@@ -96,5 +100,57 @@ describe("useDiscovery", () => {
     setVisibilityState("visible");
     act(() => document.dispatchEvent(new Event("visibilitychange")));
     await waitFor(() => expect(getDiscoveryReleases).toHaveBeenCalledTimes(2));
+  });
+
+  it("uses the cached ordinary check but forces a refresh through the refresh API", async () => {
+    setVisibilityState("visible");
+    const { client, getDiscoveryReleases, refreshDiscoveryReleases } = makeClient();
+    const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
+
+    await waitFor(() => expect(getDiscoveryReleases).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await hook.result.current.ensureAvailability(items[0]);
+    });
+    expect(getDiscoveryReleases).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await hook.result.current.refreshAvailability(items[0]);
+    });
+    expect(refreshDiscoveryReleases).toHaveBeenCalledWith("movie-hot", items[0].id, "csrf-test");
+    expect(refreshDiscoveryReleases).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.availabilityById[items[0].id]?.checkedAt).toBe("2026-08-29T00:00:02.000Z");
+  });
+
+  it("reuses an in-flight refresh for concurrent checks instead of falling back to GET", async () => {
+    setVisibilityState("hidden");
+    const { client, getDiscoveryReleases, refreshDiscoveryReleases } = makeClient();
+    let resolveRefresh: (response: DiscoveryReleaseResponse) => void = () => undefined;
+    const pendingRefresh = new Promise<DiscoveryReleaseResponse>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    refreshDiscoveryReleases.mockReturnValue(pendingRefresh);
+    const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
+
+    await waitFor(() => expect(hook.result.current.items).toHaveLength(2));
+    let first = Promise.resolve(null) as Promise<DiscoveryReleaseResponse | null>;
+    let second = Promise.resolve(null) as Promise<DiscoveryReleaseResponse | null>;
+    let ordinary = Promise.resolve(null) as Promise<DiscoveryReleaseResponse | null>;
+    act(() => {
+      first = hook.result.current.refreshAvailability(items[0]);
+      second = hook.result.current.refreshAvailability(items[0]);
+      ordinary = hook.result.current.ensureAvailability(items[0]);
+    });
+
+    await waitFor(() => expect(refreshDiscoveryReleases).toHaveBeenCalledTimes(1));
+    expect(second).toBe(first);
+    expect(ordinary).toBe(first);
+    expect(getDiscoveryReleases).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRefresh({ ...releaseResponse(items[0].id), checkedAt: "2026-08-29T00:00:03.000Z" });
+      await first;
+    });
+    expect(hook.result.current.availabilityById[items[0].id]?.checkedAt).toBe("2026-08-29T00:00:03.000Z");
+    expect(hook.result.current.checkingIds.has(items[0].id)).toBe(false);
   });
 });

@@ -17,7 +17,8 @@ These PNG concepts are local visual references only. They are intentionally igno
 - Discovery collections: `热门电影`, `口碑电影`, `热门剧集`, `口碑剧集`, `Top 250`.
 - Discovery row fields: rank, Chinese title, optional original title, year, rating, genres, one-line summary, PT availability.
 - Availability states: `待检查`, `检查中`, `有资源 N`, `可能匹配 N`, `暂未找到`.
-- Desktop: discovery navigation and list occupy the first two columns; the existing inspector remains the third column.
+- Availability results are cached by the backend for up to 24 hours per collection, item, and result limit. The inspector refresh control explicitly requests a server-side refresh; it does not rely on browser-only cache invalidation.
+- Desktop: discovery navigation and list occupy the available page width until a release is selected; the existing inspector then remains the third column. Runtime status stays as a compact second row under the global service-health line.
 - Mobile: the discovery list is the primary surface; release candidates appear as a bottom sheet. Final download confirmation remains a separate explicit action.
 
 ## Design tokens
@@ -67,6 +68,8 @@ These PNG concepts are local visual references only. They are intentionally igno
 4. Selecting a discovery item prioritizes its availability check and opens the release inspector.
 5. Selecting a release performs the existing grab preview only.
 6. Only the existing explicit `加入下载` confirmation may create a qBittorrent task.
+7. The release inspector's refresh control may explicitly refresh the selected item's PT availability result through the protected backend refresh action.
+8. Runtime status is always available as a compact header row; detailed storage and download sections appear only in the relevant selection inspector.
 
 ## Allowed first-viewport copy
 
@@ -79,6 +82,7 @@ These PNG concepts are local visual references only. They are intentionally igno
 - `口碑剧集`
 - `Top 250`
 - Availability strings listed above
+- `检查片源`, `重新检查`, `重新检查片源`
 - Existing service health, NAS, download activity, release metadata, and explicit download-confirmation copy
 
 No marketing hero, decorative eyebrow, fake analytics, poster placeholder copy, or additional navigation is permitted.

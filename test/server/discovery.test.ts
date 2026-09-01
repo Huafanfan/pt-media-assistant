@@ -7,11 +7,10 @@ import type {
   SearchResponse,
 } from "../../src/shared/contracts.js";
 import {
-  AVAILABLE_CACHE_TTL_MS,
   DiscoveryItemNotFoundError,
   DiscoveryService,
   PT_QUERY_MIN_INTERVAL_MS,
-  UNAVAILABLE_CACHE_TTL_MS,
+  RELEASE_CACHE_TTL_MS,
 } from "../../src/server/discovery.js";
 import { UnknownDiscoveryCollectionError } from "../../src/server/douban.js";
 
@@ -149,10 +148,10 @@ describe("DiscoveryService", () => {
     expect(sleeps.every((milliseconds) => milliseconds === PT_QUERY_MIN_INTERVAL_MS)).toBe(true);
 
     const searchCount = search.mock.calls.length;
-    now = AVAILABLE_CACHE_TTL_MS - 1;
+    now = RELEASE_CACHE_TTL_MS - 1;
     await service.getReleases("movie-hot", "1");
     expect(search).toHaveBeenCalledTimes(searchCount);
-    now = AVAILABLE_CACHE_TTL_MS + 1;
+    now = RELEASE_CACHE_TTL_MS + 1;
     await service.getReleases("movie-hot", "1");
     expect(search.mock.calls.length).toBeGreaterThan(searchCount);
 
@@ -164,11 +163,30 @@ describe("DiscoveryService", () => {
     const before = unavailableService.getReleases("movie-hot", "3");
     await before;
     const noCallCount = (unavailableService as unknown as { prowlarr: { search: ReturnType<typeof vi.fn> } }).prowlarr.search.mock.calls.length;
-    now += UNAVAILABLE_CACHE_TTL_MS - 1;
+    now += RELEASE_CACHE_TTL_MS - 1;
     await unavailableService.getReleases("movie-hot", "3");
     expect((unavailableService as unknown as { prowlarr: { search: ReturnType<typeof vi.fn> } }).prowlarr.search).toHaveBeenCalledTimes(noCallCount);
     now += 2;
     await unavailableService.getReleases("movie-hot", "3");
     expect((unavailableService as unknown as { prowlarr: { search: ReturnType<typeof vi.fn> } }).prowlarr.search).toHaveBeenCalledTimes(noCallCount + 1);
+  });
+
+  it("bypasses a fresh cache only for an explicit refresh", async () => {
+    const search = vi.fn(async () => searchResponse([release("r1", 1)]));
+    const service = new DiscoveryService(
+      { list: vi.fn(async () => collection([item("1", { originalTitle: undefined })])) },
+      { search },
+      { minIntervalMs: 0, sleep: async () => undefined },
+    );
+
+    await service.getReleases("movie-hot", "1");
+    await service.getReleases("movie-hot", "1");
+    expect(search).toHaveBeenCalledTimes(1);
+
+    await service.getReleases("movie-hot", "1", 10, { forceRefresh: true });
+    expect(search).toHaveBeenCalledTimes(2);
+
+    await service.getReleases("movie-hot", "1");
+    expect(search).toHaveBeenCalledTimes(2);
   });
 });

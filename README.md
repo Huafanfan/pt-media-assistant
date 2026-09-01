@@ -17,7 +17,7 @@
 - **榜单浏览**：提供热门电影、口碑电影、热门剧集、口碑剧集和 Top 250 五个固定的豆瓣公开集合入口。
 - **片源检查**：打开条目后按需查询 Prowlarr，展示规格、体积、做种数等经过清洗的候选信息。
 - **明确下载**：选择只生成预览；只有点击“加入下载”并确认后，服务端才会抓取片源。
-- **运行状态**：查看 Prowlarr、qBittorrent、NAS 挂载状态，以及下载任务的进度、速度和 ETA。
+- **运行状态**：顶部状态栏显示 NAS 剩余空间和进行中的下载数量；选中片源后可查看完整进度、速度和 ETA。
 - **手机可用**：响应式布局；移动端把已选片源放进底部检查器，不需要滚到页面最下面寻找操作。
 - **局域网优先**：默认监听局域网地址，适合家中 Mac 作为服务端、手机作为客户端的使用方式。
 
@@ -149,7 +149,8 @@ npm start
 | `GET` | `/api/live` | 无上游依赖的容器存活检查 |
 | `GET` | `/api/session` | 当前局域网会话状态 |
 | `GET` | `/api/discovery/collections/:collection/items` | 获取一个固定豆瓣集合的条目 |
-| `GET` | `/api/discovery/collections/:collection/items/:itemId/releases` | 查询条目的可用片源 |
+| `GET` | `/api/discovery/collections/:collection/items/:itemId/releases` | 获取条目的可用片源；优先返回后端 24 小时缓存 |
+| `POST` | `/api/discovery/collections/:collection/items/:itemId/releases/refresh` | 明确刷新条目的可用片源并更新后端缓存 |
 | `POST` | `/api/search` | 精确搜索片名 |
 | `POST` | `/api/grab/preview` | 生成下载前检查结果 |
 | `POST` | `/api/grab` | 在明确确认后提交下载 |
@@ -168,7 +169,7 @@ npm run build        # 生产构建
 npm audit --omit=dev # 依赖安全检查
 ```
 
-项目不需要外部数据库；短期 release 缓存保存在进程内存中。豆瓣公开集合采用固定映射和服务端缓存，避免把任意 URL 或用户 Cookie 变成客户端输入。
+项目不需要外部数据库；release 原始信息和片源可用性结果都保存在服务端进程内存中，前者用于短期下载校验，后者按集合、条目和数量限制缓存最多 24 小时。普通发现请求不会因为页面重新打开而重复查询 Prowlarr；页面上的刷新按钮通过受保护的刷新接口主动更新结果。豆瓣公开集合采用固定映射和服务端缓存，避免把任意 URL 或用户 Cookie 变成客户端输入。
 
 ## 项目结构
 

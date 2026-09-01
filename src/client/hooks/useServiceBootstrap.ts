@@ -9,6 +9,7 @@ export type ServiceBootstrapState = {
   sessionError: string | null;
   healthError: string | null;
   reload: () => Promise<void>;
+  refreshHealth: () => Promise<void>;
 };
 
 function readableError(error: unknown): string {
@@ -46,9 +47,19 @@ export function useServiceBootstrap(client: ApiClient = apiClient): ServiceBoots
     setLoading(false);
   }, [client]);
 
+  const refreshHealth = useCallback(async () => {
+    setHealthError(null);
+    try {
+      setHealth(await client.getHealth());
+    } catch (error) {
+      setHealth(null);
+      setHealthError(readableError(error));
+    }
+  }, [client]);
+
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  return { loading, session, health, sessionError, healthError, reload };
+  return { loading, session, health, sessionError, healthError, reload, refreshHealth };
 }
