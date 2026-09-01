@@ -1,7 +1,12 @@
 import type {
+  DiscoveryActor,
+  DiscoveryActorProfile,
   DiscoveryCollectionId,
   DiscoveryCollectionResponse,
   DiscoveryItem,
+  DiscoveryItemDetails,
+  DiscoveryMedia,
+  DiscoveryMediaSearchResponse,
   DiscoveryReleaseResponse,
   GrabPreviewResponse,
   GrabRequest,
@@ -196,21 +201,39 @@ const discoveryCollections = new Set<DiscoveryCollectionId>([
 ]);
 
 function normalizeDiscoveryItem(payload: unknown): DiscoveryItem | null {
+  const media = normalizeDiscoveryMedia(payload);
+  const value = asRecord(payload);
+  if (!media || typeof value?.rank !== "number" || !Number.isFinite(value.rank)) return null;
+  return {
+    ...media,
+    rank: Math.max(1, Math.floor(value.rank))
+  };
+}
+
+function isSafeDiscoveryPosterUrl(value: unknown, id: string, mediaType: "movie" | "tv"): value is string {
+  if (typeof value !== "string") return false;
+  if (value === `/api/discovery/media/${mediaType}/${id}/poster`) return true;
+  if (/^\/api\/discovery\/collections\/(?:movie-hot|movie-weekly|tv-hot|tv-weekly|top250)\/items\/\d{1,16}\/poster\?page=\d+&limit=\d+$/u.test(value)) return true;
+  return /^\/api\/discovery\/actors\/\d{1,16}\/works\/\d{1,16}\/poster$/u.test(value);
+}
+
+function normalizeDiscoveryMedia(payload: unknown): DiscoveryMedia | null {
   const value = asRecord(payload);
   if (!value) return null;
   const id = asString(value.id);
   const title = asString(value.title);
   const sourceUrl = asString(value.sourceUrl);
-  if (!/^\d{1,16}$/u.test(id) || !title || !/^https:\/\/movie\.douban\.com\/subject\/\d+\/$/u.test(sourceUrl)) {
-    return null;
-  }
+  const mediaType = value.mediaType === "tv" ? "tv" : value.mediaType === "movie" ? "movie" : null;
+  if (!/^\d{1,16}$/u.test(id) || !title || !mediaType || !/^https:\/\/movie\.douban\.com\/subject\/\d+\/$/u.test(sourceUrl)) return null;
   const genres = Array.isArray(value.genres)
     ? value.genres.filter((item): item is string => typeof item === "string").slice(0, 6)
     : [];
   const rating = asFiniteNumber(value.rating, -1);
+  const posterUrl = isSafeDiscoveryPosterUrl(value.posterUrl, id, mediaType) ? value.posterUrl : undefined;
   return {
     id,
     title: title.slice(0, 120),
+    ...(posterUrl ? { posterUrl } : {}),
     ...(typeof value.originalTitle === "string" && value.originalTitle.trim()
       ? { originalTitle: value.originalTitle.trim().slice(0, 160) }
       : {}),
@@ -219,11 +242,87 @@ function normalizeDiscoveryItem(payload: unknown): DiscoveryItem | null {
     ...(typeof value.ratingCount === "number" && Number.isFinite(value.ratingCount)
       ? { ratingCount: Math.max(0, Math.floor(value.ratingCount)) }
       : {}),
-    rank: Math.max(1, Math.floor(asFiniteNumber(value.rank, 1))),
-    mediaType: value.mediaType === "tv" ? "tv" : "movie",
+    mediaType,
     genres,
     summary: asString(value.summary).slice(0, 320),
+    ...(typeof value.role === "string" && value.role.trim() ? { role: value.role.trim().slice(0, 80) } : {}),
     sourceUrl
+  };
+}
+
+function normalizeDiscoveryNames(payload: unknown): string[] {
+  return Array.isArray(payload)
+    ? payload.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim().slice(0, 80))
+      .filter((item, index, values) => values.indexOf(item) === index)
+      .slice(0, 12)
+    : [];
+}
+
+function normalizeDiscoveryActors(payload: unknown): DiscoveryActor[] {
+  if (!Array.isArray(payload)) return [];
+  const actors: DiscoveryActor[] = [];
+  const seen = new Set<string>();
+  for (const entry of payload) {
+    const value = asRecord(entry);
+    const name = (typeof entry === "string" ? entry : asString(value?.name)).trim().slice(0, 80);
+    if (!name || seen.has(name)) continue;
+    const id = asString(value?.id);
+    actors.push({ name, ...( /^\d{1,16}$/u.test(id) ? { id } : {}) });
+    seen.add(name);
+    if (actors.length >= 12) break;
+  }
+  return actors;
+}
+
+function normalizeDiscoveryDetails(payload: unknown): DiscoveryItemDetails {
+  const value = asRecord(payload);
+  return {
+    itemId: asString(value?.itemId),
+    actors: normalizeDiscoveryActors(value?.actors),
+    directors: normalizeDiscoveryNames(value?.directors)
+  };
+}
+
+function normalizeDiscoveryActorProfile(payload: unknown): DiscoveryActorProfile {
+  const value = asRecord(payload);
+  const id = asString(value?.id);
+  const name = asString(value?.name).trim();
+  const normalizedId = /^\d{1,16}$/u.test(id) ? id : "";
+  const works = normalizedId && Array.isArray(value?.works)
+    ? value.works.map(normalizeDiscoveryMedia).filter((work): work is DiscoveryMedia => work !== null)
+    : [];
+  const avatarUrl = typeof value?.avatarUrl === "string"
+    && normalizedId !== ""
+    && value.avatarUrl === `/api/discovery/actors/${normalizedId}/avatar`
+    ? value.avatarUrl
+    : undefined;
+  const page = Math.min(100, Math.max(1, Math.floor(asFiniteNumber(value?.page, 1))));
+  const pageSize = Math.min(20, Math.max(1, Math.floor(asFiniteNumber(value?.pageSize, 10))));
+  const total = Math.max(0, Math.floor(asFiniteNumber(value?.total, works.length)));
+  return {
+    id: normalizedId,
+    name: name.slice(0, 120),
+    ...(typeof value?.latinName === "string" && value.latinName.trim() ? { latinName: value.latinName.trim().slice(0, 160) } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+    intro: asString(value?.intro, "暂无公开简介").slice(0, 600),
+    works,
+    page,
+    pageSize,
+    total,
+    hasNext: asBoolean(value?.hasNext, page < 100 && page * pageSize < total)
+  };
+}
+
+function normalizeDiscoveryMediaSearch(payload: unknown): DiscoveryMediaSearchResponse {
+  const value = asRecord(payload);
+  const items = Array.isArray(value?.items)
+    ? value.items.map(normalizeDiscoveryMedia).filter((item): item is DiscoveryMedia => item !== null)
+    : [];
+  return {
+    query: asString(value?.query),
+    total: Math.max(0, Math.floor(asFiniteNumber(value?.total, items.length))),
+    items
   };
 }
 
@@ -237,10 +336,17 @@ function normalizeDiscoveryCollection(
   const items = Array.isArray(value?.items)
     ? value.items.map(normalizeDiscoveryItem).filter((item): item is DiscoveryItem => item !== null)
     : [];
+  const page = Math.min(100, Math.max(1, Math.floor(asFiniteNumber(value?.page, 1))));
+  const pageSize = Math.min(20, Math.max(1, Math.floor(asFiniteNumber(value?.pageSize, 10))));
+  const total = Math.max(0, Math.floor(asFiniteNumber(value?.total, items.length)));
   return {
     collection,
     updatedAt: asString(value?.updatedAt, new Date(0).toISOString()),
     stale: asBoolean(value?.stale),
+    page,
+    pageSize,
+    total,
+    hasNext: asBoolean(value?.hasNext, page < 100 && page * pageSize < total),
     items
   };
 }
@@ -327,16 +433,56 @@ export type ApiClient = {
   getHealth(): Promise<ServiceHealth>;
   pair(request: PairRequest): Promise<SessionResponse>;
   search(request: SearchRequest, csrfToken: string): Promise<SearchResponse>;
-  getDiscoveryCollection(collection: DiscoveryCollectionId, csrfToken: string): Promise<DiscoveryCollectionResponse>;
+  getDiscoveryCollection(
+    collection: DiscoveryCollectionId,
+    csrfToken: string,
+    page?: number,
+    limit?: number
+  ): Promise<DiscoveryCollectionResponse>;
+  getDiscoveryDetails(
+    collection: DiscoveryCollectionId,
+    itemId: string,
+    csrfToken: string,
+    page?: number,
+    limit?: number
+  ): Promise<DiscoveryItemDetails>;
+  searchDiscoveryMedia(query: string, csrfToken: string, limit?: number): Promise<DiscoveryMediaSearchResponse>;
+  getDiscoveryMediaDetails(
+    mediaType: "movie" | "tv",
+    itemId: string,
+    csrfToken: string
+  ): Promise<DiscoveryItemDetails>;
+  getDiscoveryMediaReleases(
+    mediaType: "movie" | "tv",
+    itemId: string,
+    csrfToken: string,
+    limit?: number
+  ): Promise<DiscoveryReleaseResponse>;
+  refreshDiscoveryMediaReleases(
+    mediaType: "movie" | "tv",
+    itemId: string,
+    csrfToken: string,
+    limit?: number
+  ): Promise<DiscoveryReleaseResponse>;
+  getDiscoveryActor(
+    name: string,
+    csrfToken: string,
+    page?: number,
+    limit?: number
+  ): Promise<DiscoveryActorProfile>;
   getDiscoveryReleases(
     collection: DiscoveryCollectionId,
     itemId: string,
-    csrfToken: string
+    csrfToken: string,
+    page?: number,
+    limit?: number
   ): Promise<DiscoveryReleaseResponse>;
   refreshDiscoveryReleases(
     collection: DiscoveryCollectionId,
     itemId: string,
-    csrfToken: string
+    csrfToken: string,
+    page?: number,
+    limit?: number
   ): Promise<DiscoveryReleaseResponse>;
   grabPreview(releaseId: string, csrfToken: string): Promise<GrabPreviewResponse>;
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
@@ -357,6 +503,30 @@ function normalizeStorage(payload: unknown): NasStorageSummary {
     usedBytes,
     freeBytes
   };
+}
+
+function discoveryQuery(page?: number, limit?: number): string {
+  const values: string[] = [];
+  if (page !== undefined) values.push(`page=${Math.min(100, Math.max(1, Math.floor(page)))}`);
+  if (limit !== undefined) values.push(`limit=${Math.min(20, Math.max(1, Math.floor(limit)))}`);
+  return values.length > 0 ? `?${values.join("&")}` : "";
+}
+
+function discoveryActorQuery(name: string, page?: number, limit?: number): string {
+  const values = [`name=${encodeURIComponent(name.trim().slice(0, 80))}`];
+  if (page !== undefined) values.push(`page=${Math.min(100, Math.max(1, Math.floor(page)))}`);
+  if (limit !== undefined) values.push(`limit=${Math.min(20, Math.max(1, Math.floor(limit)))}`);
+  return `?${values.join("&")}`;
+}
+
+function discoveryMediaSearchQuery(query: string, limit?: number): string {
+  const values = [`query=${encodeURIComponent(query.trim().slice(0, 80))}`];
+  if (limit !== undefined) values.push(`limit=${Math.min(20, Math.max(1, Math.floor(limit)))}`);
+  return `?${values.join("&")}`;
+}
+
+function discoveryMediaPath(mediaType: "movie" | "tv", itemId: string, resource: string): string {
+  return `/api/discovery/media/${encodeURIComponent(mediaType)}/${encodeURIComponent(itemId)}/${resource}`;
 }
 
 export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
@@ -391,29 +561,89 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
       );
     },
 
-    async getDiscoveryCollection(collection, csrfToken) {
+    async getDiscoveryCollection(collection, csrfToken, page, limit) {
       return normalizeDiscoveryCollection(
-        await requestJson<unknown>(`/api/discovery/collections/${encodeURIComponent(collection)}/items`, {
+        await requestJson<unknown>(`/api/discovery/collections/${encodeURIComponent(collection)}/items${discoveryQuery(page, limit)}`, {
           headers: withCsrf(csrfToken)
         }, fetchImpl),
         collection
       );
     },
 
-    async getDiscoveryReleases(collection, itemId, csrfToken) {
-      return normalizeDiscoveryReleases(
+    async getDiscoveryDetails(collection, itemId, csrfToken, page, limit) {
+      return normalizeDiscoveryDetails(
         await requestJson<unknown>(
-          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases`,
+          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/details${discoveryQuery(page, limit)}`,
           { headers: withCsrf(csrfToken) },
           fetchImpl
         )
       );
     },
 
-    async refreshDiscoveryReleases(collection, itemId, csrfToken) {
+    async searchDiscoveryMedia(query, csrfToken, limit) {
+      return normalizeDiscoveryMediaSearch(
+        await requestJson<unknown>(
+          `/api/discovery/media${discoveryMediaSearchQuery(query, limit)}`,
+          { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async getDiscoveryMediaDetails(mediaType, itemId, csrfToken) {
+      return normalizeDiscoveryDetails(
+        await requestJson<unknown>(
+          discoveryMediaPath(mediaType, itemId, "details"),
+          { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async getDiscoveryMediaReleases(mediaType, itemId, csrfToken, limit) {
       return normalizeDiscoveryReleases(
         await requestJson<unknown>(
-          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases/refresh`,
+          `${discoveryMediaPath(mediaType, itemId, "releases")}${limit === undefined ? "" : `?limit=${Math.min(20, Math.max(1, Math.floor(limit)))}`}`,
+          { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async refreshDiscoveryMediaReleases(mediaType, itemId, csrfToken, limit) {
+      return normalizeDiscoveryReleases(
+        await requestJson<unknown>(
+          `${discoveryMediaPath(mediaType, itemId, "releases/refresh")}${limit === undefined ? "" : `?limit=${Math.min(20, Math.max(1, Math.floor(limit)))}`}`,
+          { method: "POST", headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async getDiscoveryActor(name, csrfToken, page, limit) {
+      return normalizeDiscoveryActorProfile(
+        await requestJson<unknown>(
+          `/api/discovery/actors${discoveryActorQuery(name, page, limit)}`,
+          { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async getDiscoveryReleases(collection, itemId, csrfToken, page, limit) {
+      return normalizeDiscoveryReleases(
+        await requestJson<unknown>(
+          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases${discoveryQuery(page, limit)}`,
+          { headers: withCsrf(csrfToken) },
+          fetchImpl
+        )
+      );
+    },
+
+    async refreshDiscoveryReleases(collection, itemId, csrfToken, page, limit) {
+      return normalizeDiscoveryReleases(
+        await requestJson<unknown>(
+          `/api/discovery/collections/${encodeURIComponent(collection)}/items/${encodeURIComponent(itemId)}/releases/refresh${discoveryQuery(page, limit)}`,
           { method: "POST", headers: withCsrf(csrfToken) },
           fetchImpl
         )

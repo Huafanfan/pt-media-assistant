@@ -10,7 +10,10 @@ import { ZodError, z } from "zod";
 
 import type {
   ApiErrorBody,
+  DiscoveryActorProfile,
   DiscoveryCollectionResponse,
+  DiscoveryItemDetails,
+  DiscoveryMediaSearchResponse,
   DiscoveryReleaseResponse,
   GrabPreviewResponse,
   GrabResponse,
@@ -49,7 +52,17 @@ const APP_VERSION = "0.1.0";
 export type ProwlarrService = Pick<ProwlarrClient, "search" | "getRelease" | "grab" | "check">;
 export type QBittorrentService = Pick<QBittorrentClient, "listTorrents" | "duplicateForRelease" | "check">;
 export type NasService = Pick<NasGuard, "preflight" | "storage">;
-export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getReleases">;
+export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getReleases"> & {
+  getDetails?: DiscoveryService["getDetails"];
+  getPoster?: DiscoveryService["getPoster"];
+  getMediaDetails?: DiscoveryService["getMediaDetails"];
+  getMediaPoster?: DiscoveryService["getMediaPoster"];
+  getMediaReleases?: DiscoveryService["getMediaReleases"];
+  searchMedia?: DiscoveryService["searchMedia"];
+  getActorProfile?: DiscoveryService["getActorProfile"];
+  getActorAvatar?: DiscoveryService["getActorAvatar"];
+  getActorWorkPoster?: DiscoveryService["getActorWorkPoster"];
+};
 
 export type AppServices = {
   config?: AppConfig;
@@ -70,7 +83,24 @@ const discoveryCollectionSchema = z.enum(["movie-hot", "movie-weekly", "tv-hot",
 const discoveryItemIdSchema = z.string().regex(/^\d{1,16}$/u);
 const discoveryCollectionParamsSchema = z.object({ collection: discoveryCollectionSchema });
 const discoveryItemParamsSchema = z.object({ collection: discoveryCollectionSchema, itemId: discoveryItemIdSchema });
-const discoveryQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(20).optional() });
+const discoveryActorParamsSchema = z.object({ actorId: discoveryItemIdSchema });
+const discoveryActorWorkParamsSchema = z.object({ actorId: discoveryItemIdSchema, workId: discoveryItemIdSchema });
+const discoveryMediaTypeSchema = z.enum(["movie", "tv"]);
+const discoveryMediaParamsSchema = z.object({ mediaType: discoveryMediaTypeSchema, itemId: discoveryItemIdSchema });
+const discoveryQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+const discoveryActorQuerySchema = discoveryQuerySchema.extend({
+  name: z.string().trim().min(1).max(80),
+});
+const discoveryMediaSearchQuerySchema = z.object({
+  query: z.string().trim().min(1).max(80),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+const discoveryMediaReleaseQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
 
 function requestIp(request: FastifyRequest): string {
   return request.ip || "unknown";
@@ -316,6 +346,192 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     return reply.header("Cache-Control", "no-store").send({ paired: false });
   });
 
+  app.get("/api/discovery/actors", {
+    config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getActorProfile !== "function") return genericUpstreamError(reply);
+    let query: z.infer<typeof discoveryActorQuerySchema>;
+    try {
+      query = discoveryActorQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryActorProfile = await discovery.getActorProfile(
+        query.name,
+        query.page ?? 1,
+        query.limit ?? 10,
+      );
+      return reply.send(response);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/actors/:actorId/avatar", {
+    config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getActorAvatar !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryActorParamsSchema>;
+    try {
+      params = discoveryActorParamsSchema.parse(request.params);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const asset = await discovery.getActorAvatar(params.actorId);
+      return reply
+        .header("Cache-Control", "private, max-age=86400")
+        .header("X-Content-Type-Options", "nosniff")
+        .type(asset.contentType)
+        .send(asset.body);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/actors/:actorId/works/:workId/poster", {
+    config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getActorWorkPoster !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryActorWorkParamsSchema>;
+    try {
+      params = discoveryActorWorkParamsSchema.parse(request.params);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const asset = await discovery.getActorWorkPoster(params.actorId, params.workId);
+      return reply
+        .header("Cache-Control", "private, max-age=86400")
+        .header("X-Content-Type-Options", "nosniff")
+        .type(asset.contentType)
+        .send(asset.body);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/media", {
+    config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.searchMedia !== "function") return genericUpstreamError(reply);
+    let query: z.infer<typeof discoveryMediaSearchQuerySchema>;
+    try {
+      query = discoveryMediaSearchQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryMediaSearchResponse = await discovery.searchMedia(query.query, query.limit ?? 10);
+      return reply.send(response);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/media/:mediaType/:itemId/details", {
+    config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getMediaDetails !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryMediaParamsSchema>;
+    try {
+      params = discoveryMediaParamsSchema.parse(request.params);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryItemDetails = await discovery.getMediaDetails(params.mediaType, params.itemId);
+      return reply.send(response);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/media/:mediaType/:itemId/poster", {
+    config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getMediaPoster !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryMediaParamsSchema>;
+    try {
+      params = discoveryMediaParamsSchema.parse(request.params);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const asset = await discovery.getMediaPoster(params.mediaType, params.itemId);
+      return reply
+        .header("Cache-Control", "private, max-age=86400")
+        .header("X-Content-Type-Options", "nosniff")
+        .type(asset.contentType)
+        .send(asset.body);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/media/:mediaType/:itemId/releases", {
+    config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getMediaReleases !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryMediaParamsSchema>;
+    let query: z.infer<typeof discoveryMediaReleaseQuerySchema>;
+    try {
+      params = discoveryMediaParamsSchema.parse(request.params);
+      query = discoveryMediaReleaseQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryReleaseResponse = await discovery.getMediaReleases(
+        params.mediaType,
+        params.itemId,
+        query.limit ?? 10,
+      );
+      return reply.send(response);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.post("/api/discovery/media/:mediaType/:itemId/releases/refresh", {
+    config: { rateLimit: { max: 10, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getMediaReleases !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryMediaParamsSchema>;
+    let query: z.infer<typeof discoveryMediaReleaseQuerySchema>;
+    try {
+      params = discoveryMediaParamsSchema.parse(request.params);
+      query = discoveryMediaReleaseQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryReleaseResponse = await discovery.getMediaReleases(
+        params.mediaType,
+        params.itemId,
+        query.limit ?? 10,
+        { forceRefresh: true },
+      );
+      return reply.send(response);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
   app.get("/api/discovery/collections/:collection/items", {
     config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
   }, async (request, reply) => {
@@ -330,9 +546,76 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
       return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
     }
     try {
-      const response: DiscoveryCollectionResponse = await discovery.list(params.collection, query.limit ?? 10);
+      const response: DiscoveryCollectionResponse = await discovery.list(
+        params.collection,
+        query.page ?? 1,
+        query.limit ?? 10,
+      );
       return reply.send(response);
     } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/collections/:collection/items/:itemId/details", {
+    config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getDetails !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryItemParamsSchema>;
+    let query: z.infer<typeof discoveryQuerySchema>;
+    try {
+      params = discoveryItemParamsSchema.parse(request.params);
+      query = discoveryQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const response: DiscoveryItemDetails = await discovery.getDetails(
+        params.collection,
+        params.itemId,
+        query.page ?? 1,
+        query.limit ?? 10,
+      );
+      return reply.send(response);
+    } catch (error) {
+      if (error instanceof DiscoveryItemNotFoundError) {
+        return sendError(reply, 404, "Discovery item not found", "DISCOVERY_ITEM_NOT_FOUND");
+      }
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.get("/api/discovery/collections/:collection/items/:itemId/poster", {
+    config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    if (typeof discovery.getPoster !== "function") return genericUpstreamError(reply);
+    let params: z.infer<typeof discoveryItemParamsSchema>;
+    let query: z.infer<typeof discoveryQuerySchema>;
+    try {
+      params = discoveryItemParamsSchema.parse(request.params);
+      query = discoveryQuerySchema.parse(request.query);
+    } catch {
+      return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    }
+    try {
+      const asset = await discovery.getPoster(
+        params.collection,
+        params.itemId,
+        query.page ?? 1,
+        query.limit ?? 10,
+      );
+      return reply
+        .header("Cache-Control", "private, max-age=86400")
+        .header("X-Content-Type-Options", "nosniff")
+        .type(asset.contentType)
+        .send(asset.body);
+    } catch (error) {
+      if (error instanceof DiscoveryItemNotFoundError) {
+        return sendError(reply, 404, "Discovery item not found", "DISCOVERY_ITEM_NOT_FOUND");
+      }
       return genericUpstreamError(reply);
     }
   });
@@ -351,11 +634,9 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
       return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
     }
     try {
-      const response: DiscoveryReleaseResponse = await discovery.getReleases(
-        params.collection,
-        params.itemId,
-        query.limit ?? 10,
-      );
+      const response: DiscoveryReleaseResponse = query.page === undefined
+        ? await discovery.getReleases(params.collection, params.itemId, query.limit ?? 10)
+        : await discovery.getReleases(params.collection, params.itemId, query.limit ?? 10, { page: query.page });
       return reply.send(response);
     } catch (error) {
       if (error instanceof DiscoveryItemNotFoundError) {
@@ -383,7 +664,7 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
         params.collection,
         params.itemId,
         query.limit ?? 10,
-        { forceRefresh: true },
+        { forceRefresh: true, ...(query.page === undefined ? {} : { page: query.page }) },
       );
       return reply.send(response);
     } catch (error) {

@@ -32,13 +32,18 @@ const response = (overrides: Partial<DiscoveryReleaseResponse> = {}): DiscoveryR
 function renderBrowser(overrides: Partial<React.ComponentProps<typeof DiscoveryBrowser>> = {}) {
   const props: React.ComponentProps<typeof DiscoveryBrowser> = {
     collection: "movie-hot",
+    page: 1,
+    pageSize: 10,
     items: [item()],
+    total: 1,
+    hasNext: false,
     loading: false,
     error: null,
     selectedItemId: null,
     availabilityById: {},
     checkingIds: new Set<string>(),
     onCollectionChange: vi.fn(),
+    onPageChange: vi.fn(),
     onSelectItem: vi.fn(),
     onRetry: vi.fn(),
     ...overrides
@@ -75,6 +80,20 @@ describe("DiscoveryBrowser", () => {
     expect(props.onSelectItem).toHaveBeenCalledWith(expect.objectContaining({ id: "subject-1" }));
     expect(screen.getByRole("button", { name: /奥德赛/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("tabindex", "0");
+  });
+
+  it("renders ten-item pagination and moves between pages", async () => {
+    const user = userEvent.setup();
+    const props = renderBrowser({ page: 2, pageSize: 10, total: 25, hasNext: true });
+
+    expect(screen.getByText("11–11 / 25")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上一页" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).not.toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(props.onPageChange).toHaveBeenCalledWith(3);
+    await user.click(screen.getByRole("button", { name: "上一页" }));
+    expect(props.onPageChange).toHaveBeenCalledWith(1);
   });
 
   it("renders pending, checking, available, possible, and unavailable states", () => {

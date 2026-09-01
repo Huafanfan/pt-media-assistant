@@ -1,7 +1,11 @@
 import type {
   DiscoveryCollectionId,
   DiscoveryCollectionResponse,
+  DiscoveryActorProfile,
   DiscoveryItem,
+  DiscoveryItemDetails,
+  DiscoveryMedia,
+  DiscoveryMediaSearchResponse,
   DiscoveryReleaseResponse,
   ParsedIntent,
   ReleaseSummary,
@@ -12,11 +16,16 @@ import {
   DoubanClient,
   isDiscoveryCollectionId,
   normalizeDiscoveryLimit,
+  normalizeDiscoveryPage,
   UnknownDiscoveryCollectionError,
+  type DiscoveryPosterAsset,
+  type DoubanSubjectDetails,
 } from "./douban.js";
 
 export const PT_QUERY_MIN_INTERVAL_MS = 1_200;
 export const RELEASE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Keep one bounded PT snapshot so the inspector can paginate without a new upstream query. */
+export const DISCOVERY_RELEASE_FETCH_LIMIT = 50;
 // Kept as aliases for callers that used the previous status-specific names.
 export const AVAILABLE_CACHE_TTL_MS = RELEASE_CACHE_TTL_MS;
 export const UNAVAILABLE_CACHE_TTL_MS = RELEASE_CACHE_TTL_MS;
@@ -34,8 +43,25 @@ export class DiscoveryItemNotFoundError extends Error {
 }
 
 /** A deliberately small interface makes the PT adapter straightforward to fake in tests. */
-export type DiscoveryDoubanClient = Pick<DoubanClient, "list"> | {
-  list: (collection: DiscoveryCollectionId | string, limit?: number) => Promise<DiscoveryCollectionResponse>;
+export type DiscoveryDoubanClient = {
+  list: (
+    collection: DiscoveryCollectionId | string,
+    page?: number,
+    limit?: number,
+  ) => Promise<DiscoveryCollectionResponse>;
+  getDetails?: (itemId: string, mediaType: "movie" | "tv") => Promise<DoubanSubjectDetails>;
+  getMedia?: (itemId: string, mediaType: "movie" | "tv") => Promise<DiscoveryMedia>;
+  getMediaPoster?: (itemId: string, mediaType: "movie" | "tv") => Promise<DiscoveryPosterAsset>;
+  searchMedia?: (query: string, limit?: number) => Promise<DiscoveryMediaSearchResponse>;
+  getActorProfile?: (name: string, page?: number, limit?: number) => Promise<DiscoveryActorProfile>;
+  getActorAvatar?: (actorId: string) => Promise<DiscoveryPosterAsset>;
+  getActorWorkPoster?: (actorId: string, workId: string) => Promise<DiscoveryPosterAsset>;
+  getPoster?: (
+    collection: DiscoveryCollectionId,
+    itemId: string,
+    page?: number,
+    limit?: number,
+  ) => Promise<DiscoveryPosterAsset>;
 };
 
 export type DiscoverySearchResult = SearchResponse | ReleaseSummary[];
@@ -53,6 +79,7 @@ export type DiscoveryServiceOptions = {
 
 export type DiscoveryReleaseQueryOptions = {
   forceRefresh?: boolean;
+  page?: number;
 };
 
 type CachedReleases = {
@@ -92,22 +119,18 @@ function copyRelease(release: ReleaseSummary): ReleaseSummary {
   };
 }
 
-function cloneReleaseResponse(response: DiscoveryReleaseResponse, limit?: number): DiscoveryReleaseResponse {
-  const boundedLimit = limit === undefined ? undefined : normalizeDiscoveryLimit(limit);
-  const releases = boundedLimit === undefined
-    ? response.releases
-    : response.releases.slice(0, boundedLimit);
+function cloneReleaseResponse(response: DiscoveryReleaseResponse): DiscoveryReleaseResponse {
   return {
     itemId: response.itemId,
     query: response.query,
     status: response.status,
     checkedAt: response.checkedAt,
     total: response.total,
-    releases: releases.map(copyRelease),
+    releases: response.releases.map(copyRelease),
   };
 }
 
-function queryFor(item: DiscoveryItem, field: "title" | "originalTitle"): string {
+function queryFor(item: DiscoveryMedia, field: "title" | "originalTitle"): string {
   const title = field === "originalTitle" ? item.originalTitle : item.title;
   const base = title?.trim() || item.title.trim();
   return item.year ? `${base} ${item.year}` : base;
@@ -130,6 +153,10 @@ function statusFor(releases: ReleaseSummary[]): DiscoveryReleaseResponse["status
   if (releases.some((release) => seeders(release) > 0)) return "available";
   if (releases.length > 0) return "possible";
   return "unavailable";
+}
+
+function mediaKey(mediaType: "movie" | "tv", itemId: string): string {
+  return `${mediaType}:${itemId}`;
 }
 
 function defaultSleep(milliseconds: number): Promise<void> {
@@ -206,13 +233,21 @@ export class DiscoveryService {
     this.collectionLimit = normalizeDiscoveryLimit(options.collectionLimit ?? DEFAULT_DISCOVERY_LIMIT);
   }
 
-  public async list(collection: DiscoveryCollectionId | string, limit = DEFAULT_DISCOVERY_LIMIT): Promise<DiscoveryCollectionResponse> {
+  public async list(
+    collection: DiscoveryCollectionId | string,
+    page = 1,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryCollectionResponse> {
     if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
-    return this.douban.list(collection, normalizeDiscoveryLimit(limit));
+    return this.douban.list(collection, normalizeDiscoveryPage(page), normalizeDiscoveryLimit(limit));
   }
 
-  public getCollection(collection: DiscoveryCollectionId | string, limit = DEFAULT_DISCOVERY_LIMIT): Promise<DiscoveryCollectionResponse> {
-    return this.list(collection, limit);
+  public getCollection(
+    collection: DiscoveryCollectionId | string,
+    page = 1,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryCollectionResponse> {
+    return this.list(collection, page, limit);
   }
 
   public async getReleases(
@@ -222,22 +257,39 @@ export class DiscoveryService {
     options: DiscoveryReleaseQueryOptions = {},
   ): Promise<DiscoveryReleaseResponse> {
     if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
+    // `limit` remains part of the public route for compatibility with the
+    // collection page size. Release candidates are deliberately fetched as a
+    // bounded snapshot and paginated locally by the inspector.
+    const boundedLimit = normalizeDiscoveryLimit(limit);
+    const page = normalizeDiscoveryPage(options.page);
+    const normalizedItemId = String(itemId);
+    const item = await this.findItem(collection, normalizedItemId, page, boundedLimit);
+    return this.getMediaReleases(item.mediaType, item.id, boundedLimit, options, item);
+  }
+
+  public async getMediaReleases(
+    mediaType: "movie" | "tv",
+    itemId: string,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+    options: DiscoveryReleaseQueryOptions = {},
+    knownMedia?: DiscoveryMedia,
+  ): Promise<DiscoveryReleaseResponse> {
     const boundedLimit = normalizeDiscoveryLimit(limit);
     const normalizedItemId = String(itemId);
-    const key = `${collection}:${normalizedItemId}:${boundedLimit}`;
+    const key = mediaKey(mediaType, normalizedItemId);
     const cached = this.releaseCache.get(key);
     if (!options.forceRefresh && cached && cached.expiresAt > this.now()) {
-      return cloneReleaseResponse(cached.response, boundedLimit);
+      return cloneReleaseResponse(cached.response);
     }
 
     const existing = this.pendingReleases.get(key);
-    if (existing) return existing.then((response) => cloneReleaseResponse(response, boundedLimit));
+    if (existing) return existing.then(cloneReleaseResponse);
 
-    const operation = this.queryReleases(collection, normalizedItemId, boundedLimit, key);
+    const operation = this.queryReleases(mediaType, normalizedItemId, boundedLimit, key, knownMedia);
     this.pendingReleases.set(key, operation);
     try {
       const response = await operation;
-      return cloneReleaseResponse(response, boundedLimit);
+      return cloneReleaseResponse(response);
     } finally {
       if (this.pendingReleases.get(key) === operation) this.pendingReleases.delete(key);
     }
@@ -247,21 +299,129 @@ export class DiscoveryService {
     this.releaseCache.clear();
   }
 
+  private async findItem(
+    collection: DiscoveryCollectionId | string,
+    itemId: string,
+    page: number,
+    limit: number,
+  ): Promise<DiscoveryItem> {
+    if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
+    const response = await this.douban.list(
+      collection,
+      normalizeDiscoveryPage(page),
+      normalizeDiscoveryLimit(limit),
+    );
+    const item = response.items.find((candidate) => String(candidate.id) === String(itemId));
+    if (!item) throw new DiscoveryItemNotFoundError(collection, String(itemId));
+    return item;
+  }
+
+  public async getDetails(
+    collection: DiscoveryCollectionId | string,
+    itemId: string,
+    page = 1,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryItemDetails> {
+    const item = await this.findItem(collection, itemId, page, limit);
+    if (!this.douban.getDetails) throw new Error("Discovery details unavailable");
+    const details = await this.douban.getDetails(item.id, item.mediaType);
+    return {
+      itemId: item.id,
+      actors: [...details.actors],
+      directors: [...details.directors],
+    };
+  }
+
+  public async getMediaDetails(
+    mediaType: "movie" | "tv",
+    itemId: string,
+  ): Promise<DiscoveryItemDetails> {
+    if (!this.douban.getDetails) throw new Error("Discovery details unavailable");
+    const details = await this.douban.getDetails(itemId, mediaType);
+    return {
+      itemId: details.itemId,
+      actors: details.actors.map((actor) => ({ ...actor })),
+      directors: [...details.directors],
+    };
+  }
+
+  public async getMediaPoster(
+    mediaType: "movie" | "tv",
+    itemId: string,
+  ): Promise<DiscoveryPosterAsset> {
+    if (!this.douban.getMediaPoster) throw new Error("Discovery media poster unavailable");
+    return this.douban.getMediaPoster(itemId, mediaType);
+  }
+
+  public async searchMedia(
+    query: string,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryMediaSearchResponse> {
+    if (!this.douban.searchMedia) throw new Error("Discovery media search unavailable");
+    return this.douban.searchMedia(query, normalizeDiscoveryLimit(limit));
+  }
+
+  public async getActorProfile(
+    name: string,
+    page = 1,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryActorProfile> {
+    if (!this.douban.getActorProfile) throw new Error("Discovery actor profile unavailable");
+    const profile = await this.douban.getActorProfile(
+      name,
+      normalizeDiscoveryPage(page),
+      normalizeDiscoveryLimit(limit),
+    );
+    return {
+      id: profile.id,
+      name: profile.name,
+      ...(profile.latinName ? { latinName: profile.latinName } : {}),
+      ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
+      intro: profile.intro,
+      works: profile.works.map((work) => ({ ...work })),
+      page: profile.page,
+      pageSize: profile.pageSize,
+      total: profile.total,
+      hasNext: profile.hasNext,
+    };
+  }
+
+  public async getActorAvatar(actorId: string): Promise<DiscoveryPosterAsset> {
+    if (!this.douban.getActorAvatar) throw new Error("Discovery actor avatar unavailable");
+    return this.douban.getActorAvatar(actorId);
+  }
+
+  public async getActorWorkPoster(actorId: string, workId: string): Promise<DiscoveryPosterAsset> {
+    if (!this.douban.getActorWorkPoster) throw new Error("Discovery actor work poster unavailable");
+    return this.douban.getActorWorkPoster(actorId, workId);
+  }
+
+  public async getPoster(
+    collection: DiscoveryCollectionId | string,
+    itemId: string,
+    page = 1,
+    limit = DEFAULT_DISCOVERY_LIMIT,
+  ): Promise<DiscoveryPosterAsset> {
+    const item = await this.findItem(collection, itemId, page, limit);
+    if (!this.douban.getPoster) throw new Error("Discovery poster unavailable");
+    return this.douban.getPoster(collection as DiscoveryCollectionId, item.id, page, limit);
+  }
+
   private async queryReleases(
-    collection: DiscoveryCollectionId,
+    mediaType: "movie" | "tv",
     itemId: string,
     limit: number,
     key: string,
+    knownMedia?: DiscoveryMedia,
   ): Promise<DiscoveryReleaseResponse> {
-    // Fetch the collection only after a release-cache miss.  The item lookup
-    // is intentionally done against the allowlisted Douban response rather
-    // than accepting title/year data from the browser.
-    const collectionResponse = await this.douban.list(collection, this.collectionLimit);
-    const item = collectionResponse.items.find((candidate) => String(candidate.id) === itemId);
-    if (!item) throw new DiscoveryItemNotFoundError(collection, itemId);
+    // The media summary is always sourced from an allowlisted Douban response
+    // or from a server-known collection item; title/year data never comes
+    // from the browser.
+    const item = knownMedia ?? await this.douban.getMedia?.(itemId, mediaType);
+    if (!item) throw new Error("Discovery media unavailable");
 
     const primaryQuery = item.originalTitle ? queryFor(item, "originalTitle") : queryFor(item, "title");
-    const primary = await this.enqueuePtSearch(primaryQuery, limit);
+    const primary = await this.enqueuePtSearch(primaryQuery, DISCOVERY_RELEASE_FETCH_LIMIT);
     let releases = mergeReleases(asReleases(primary));
     let selectedQuery = primaryQuery;
 
@@ -270,7 +430,7 @@ export class DiscoveryService {
     // a request can make two PT upstream calls.
     if (item.originalTitle && releases.length === 0) {
       const fallbackQuery = queryFor(item, "title");
-      const fallback = await this.enqueuePtSearch(fallbackQuery, limit);
+      const fallback = await this.enqueuePtSearch(fallbackQuery, DISCOVERY_RELEASE_FETCH_LIMIT);
       releases = mergeReleases(releases, asReleases(fallback));
       selectedQuery = fallbackQuery;
     }
@@ -282,7 +442,7 @@ export class DiscoveryService {
       status,
       checkedAt: new Date(this.now()).toISOString(),
       total: releases.length,
-      releases: releases.slice(0, limit),
+      releases: releases.slice(0, DISCOVERY_RELEASE_FETCH_LIMIT),
     };
     this.releaseCache.set(key, { response, expiresAt: this.now() + RELEASE_CACHE_TTL_MS });
     return response;

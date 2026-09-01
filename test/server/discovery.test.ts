@@ -34,6 +34,10 @@ function collection(items: DiscoveryItem[] = [item()]): DiscoveryCollectionRespo
     collection: "movie-hot",
     updatedAt: new Date(0).toISOString(),
     stale: false,
+    page: 1,
+    pageSize: 10,
+    total: items.length,
+    hasNext: false,
     items,
   };
 }
@@ -72,8 +76,8 @@ describe("DiscoveryService", () => {
       prowlarr: { search: vi.fn(async () => searchResponse([])) },
     });
 
-    await service.list("movie-hot", 3);
-    expect(list).toHaveBeenCalledWith("movie-hot", 3);
+    await service.list("movie-hot", 1, 3);
+    expect(list).toHaveBeenCalledWith("movie-hot", 1, 3);
     await expect(service.list("bogus")).rejects.toBeInstanceOf(UnknownDiscoveryCollectionError);
   });
 
@@ -96,6 +100,37 @@ describe("DiscoveryService", () => {
     expect(result.status).toBe("available");
     expect(result.total).toBe(2);
     expect(result.releases.map((entry) => entry.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("keeps a bounded full candidate snapshot for local inspector pagination", async () => {
+    const releases = Array.from({ length: 12 }, (_, index) => release(`r${index + 1}`, index === 0 ? 2 : 0));
+    const search = vi.fn(async () => searchResponse(releases));
+    const service = new DiscoveryService(
+      { list: vi.fn(async () => collection()) },
+      { search },
+      { minIntervalMs: 0, sleep: async () => undefined },
+    );
+
+    const first = await service.getReleases("movie-hot", "1", 10);
+    const second = await service.getReleases("movie-hot", "1", 20);
+
+    expect(first.total).toBe(12);
+    expect(first.releases).toHaveLength(12);
+    expect(second.releases).toHaveLength(12);
+    expect(search).toHaveBeenCalledWith({ searchTerm: "Original Title 2024" }, 50);
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves releases against the requested discovery page", async () => {
+    const list = vi.fn(async () => collection([item("11", { originalTitle: undefined })]));
+    const service = new DiscoveryService(
+      { list },
+      { search: vi.fn(async () => searchResponse([release("r11", 1)])) },
+      { minIntervalMs: 0, sleep: async () => undefined },
+    );
+
+    await service.getReleases("movie-hot", "11", 10, { page: 2 });
+    expect(list).toHaveBeenCalledWith("movie-hot", 2, 10);
   });
 
   it("classifies possible and unavailable results, and merges concurrent same-item work", async () => {

@@ -5,6 +5,7 @@ import type {
   DiscoveryItem,
   DiscoveryReleaseResponse
 } from "../../shared/contracts";
+import { DiscoveryPoster } from "./DiscoveryPoster";
 import "../discovery.css";
 
 const COLLECTIONS: ReadonlyArray<{ id: DiscoveryCollectionId; label: string }> = [
@@ -20,13 +21,18 @@ type AvailabilityById = Readonly<Record<string, DiscoveryAvailability>> | Readon
 
 export type DiscoveryBrowserProps = {
   collection: DiscoveryCollectionId;
+  page: number;
+  pageSize: number;
   items: DiscoveryItem[];
+  total: number;
+  hasNext: boolean;
   loading: boolean;
   error: string | null;
   selectedItemId: string | null;
   availabilityById: AvailabilityById;
   checkingIds: ReadonlySet<string> | readonly string[];
   onCollectionChange: (collection: DiscoveryCollectionId) => void;
+  onPageChange: (page: number) => void;
   onSelectItem: (item: DiscoveryItem) => void;
   onRetry: () => void;
 };
@@ -100,13 +106,18 @@ function changeByOffset(collection: DiscoveryCollectionId, offset: number): Disc
 
 export function DiscoveryBrowser({
   collection,
+  page,
+  pageSize,
   items,
+  total,
+  hasNext,
   loading,
   error,
   selectedItemId,
   availabilityById,
   checkingIds,
   onCollectionChange,
+  onPageChange,
   onSelectItem,
   onRetry
 }: DiscoveryBrowserProps) {
@@ -218,6 +229,11 @@ export function DiscoveryBrowser({
                     <span className="discovery-rank" aria-hidden="true">
                       {formatRank(item.rank)}
                     </span>
+                    <DiscoveryPoster
+                      src={item.posterUrl}
+                      title={item.title}
+                      className="discovery-item-poster"
+                    />
                     <span className="discovery-item-copy">
                       <span className="discovery-item-title" role="heading" aria-level={3}>
                         {item.title}
@@ -250,6 +266,31 @@ export function DiscoveryBrowser({
             })}
           </ol>
         )}
+        {!loading && !error && items.length > 0 ? (
+          <nav className="discovery-pagination" aria-label="榜单翻页">
+            <span className="discovery-pagination-summary">
+              {(page - 1) * pageSize + 1}–{(page - 1) * pageSize + items.length} / {total}
+            </span>
+            <div className="discovery-pagination-actions">
+              <button
+                className="discovery-pagination-button"
+                type="button"
+                disabled={page <= 1}
+                onClick={() => onPageChange(page - 1)}
+              >
+                上一页
+              </button>
+              <button
+                className="discovery-pagination-button is-primary"
+                type="button"
+                disabled={!hasNext}
+                onClick={() => onPageChange(page + 1)}
+              >
+                下一页
+              </button>
+            </div>
+          </nav>
+        ) : null}
       </div>
     </section>
   );

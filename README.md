@@ -14,8 +14,9 @@
 
 ## 能做什么
 
-- **榜单浏览**：提供热门电影、口碑电影、热门剧集、口碑剧集和 Top 250 五个固定的豆瓣公开集合入口。
-- **片源检查**：打开条目后按需查询 Prowlarr，展示规格、体积、做种数等经过清洗的候选信息。
+- **榜单浏览**：提供热门电影、口碑电影、热门剧集、口碑剧集和 Top 250 五个固定的豆瓣公开集合入口；默认每页 10 条，可继续翻页。
+- **内容资料**：榜单行展示海报缩略图；榜单、片名搜索和演员作品都进入同一套作品详情，展示海报、简介、主演和导演信息；点击主演可进入演员索引。
+- **片源检查**：打开任意作品后按需查询 Prowlarr，服务端按作品缓存最多 50 个候选，界面每页展示 10 个并支持翻页；刷新按钮才会主动重新查询。
 - **明确下载**：选择只生成预览；只有点击“加入下载”并确认后，服务端才会抓取片源。
 - **运行状态**：顶部状态栏显示 NAS 剩余空间和进行中的下载数量；选中片源后可查看完整进度、速度和 ETA。
 - **手机可用**：响应式布局；移动端把已选片源放进底部检查器，不需要滚到页面最下面寻找操作。
@@ -25,8 +26,8 @@
 
 ![Workflow](docs/assets/workflow.svg)
 
-1. 在“发现”页浏览公开榜单，或切换到精确搜索。
-2. 打开条目，按需查看 PT 可用片源；Prowlarr 查询有节流和超时保护。
+1. 在“发现”页浏览公开榜单、海报和排名，使用分页查看更多条目，或切换到精确搜索。
+2. 打开条目，按需查看 PT 可用片源，或点击主演进入演员资料和影视作品索引；从榜单、搜索或演员作品进入时使用同一套作品详情，Prowlarr 查询有节流和超时保护。
 3. 选择一个候选，检查体积、做种数、目标存储和当前下载状态。
 4. 用户明确确认后，服务端再次检查会话、NAS 挂载和重复任务，再发送给 qBittorrent。
 
@@ -54,6 +55,8 @@
 - Prowlarr API key 只在服务端内存中使用，不进入浏览器响应和日志。
 - 发布信息的原始下载 URL、GUID 和 tracker 字段只保留在服务端短期缓存中；浏览器只收到不透明的 release id。
 - 豆瓣集合 id 是服务端固定映射，客户端不能提交任意上游 URL。
+- 豆瓣海报只接受固定 `img*.doubanio.com` HTTPS 来源，由服务端同源代理并缓存；浏览器不会直接请求任意图片地址。
+- 演职员信息只返回经过长度和数量限制的姓名列表，且仅在打开条目时按需读取。
 - 下载接口需要有效会话、来源校验、最新 NAS 挂载检查、不透明 release id，以及 `confirm: true`。
 
 ## 推荐：OrbStack 常驻部署
@@ -148,9 +151,19 @@ npm start
 | `GET` | `/api/health` | 服务、Prowlarr、qBittorrent 和 NAS 的健康状态 |
 | `GET` | `/api/live` | 无上游依赖的容器存活检查 |
 | `GET` | `/api/session` | 当前局域网会话状态 |
-| `GET` | `/api/discovery/collections/:collection/items` | 获取一个固定豆瓣集合的条目 |
-| `GET` | `/api/discovery/collections/:collection/items/:itemId/releases` | 获取条目的可用片源；优先返回后端 24 小时缓存 |
-| `POST` | `/api/discovery/collections/:collection/items/:itemId/releases/refresh` | 明确刷新条目的可用片源并更新后端缓存 |
+| `GET` | `/api/discovery/collections/:collection/items?page=&limit=` | 获取固定豆瓣集合的一页条目，默认每页 10 条 |
+| `GET` | `/api/discovery/collections/:collection/items/:itemId/details?page=&limit=` | 获取条目的主演和导演资料 |
+| `GET` | `/api/discovery/collections/:collection/items/:itemId/poster?page=&limit=` | 获取经过来源校验的同源海报代理 |
+| `GET` | `/api/discovery/collections/:collection/items/:itemId/releases?page=&limit=` | 获取条目的可用片源；优先返回后端 24 小时缓存 |
+| `POST` | `/api/discovery/collections/:collection/items/:itemId/releases/refresh?page=&limit=` | 明确刷新条目的可用片源并更新后端缓存 |
+| `GET` | `/api/discovery/actors?name=&page=&limit=` | 获取演员资料和一页影视作品 |
+| `GET` | `/api/discovery/actors/:actorId/avatar` | 获取经过来源校验的同源演员头像代理 |
+| `GET` | `/api/discovery/actors/:actorId/works/:workId/poster` | 获取经过来源校验的同源作品海报代理 |
+| `GET` | `/api/discovery/media?query=&limit=` | 搜索电影/剧集作品建议 |
+| `GET` | `/api/discovery/media/:mediaType/:itemId/details` | 获取统一作品详情 |
+| `GET` | `/api/discovery/media/:mediaType/:itemId/poster` | 获取统一作品海报代理 |
+| `GET` | `/api/discovery/media/:mediaType/:itemId/releases?limit=` | 获取统一作品片源；按作品 ID 复用后端缓存 |
+| `POST` | `/api/discovery/media/:mediaType/:itemId/releases/refresh?limit=` | 明确刷新统一作品片源 |
 | `POST` | `/api/search` | 精确搜索片名 |
 | `POST` | `/api/grab/preview` | 生成下载前检查结果 |
 | `POST` | `/api/grab` | 在明确确认后提交下载 |
@@ -169,7 +182,7 @@ npm run build        # 生产构建
 npm audit --omit=dev # 依赖安全检查
 ```
 
-项目不需要外部数据库；release 原始信息和片源可用性结果都保存在服务端进程内存中，前者用于短期下载校验，后者按集合、条目和数量限制缓存最多 24 小时。普通发现请求不会因为页面重新打开而重复查询 Prowlarr；页面上的刷新按钮通过受保护的刷新接口主动更新结果。豆瓣公开集合采用固定映射和服务端缓存，避免把任意 URL 或用户 Cookie 变成客户端输入。
+项目不需要外部数据库；榜单页、演职员资料、作品搜索、海报、演员索引和片源可用性结果都保存在服务端进程内存缓存中。作品详情和片源都按规范化的媒体类型与作品 ID 复用，片源一次查询最多保留 50 个候选供界面本地分页。普通发现请求不会因为页面重新打开而重复查询 Prowlarr；页面上的刷新按钮通过受保护的刷新接口主动更新结果。豆瓣公开集合不会把任意 URL 或用户 Cookie 变成客户端输入。
 
 ## 项目结构
 

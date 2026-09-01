@@ -40,8 +40,17 @@ function setVisibilityState(state: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
 }
 
-function collectionResponse(collection: DiscoveryCollectionId): DiscoveryCollectionResponse {
-  return { collection, updatedAt: "2026-08-29T00:00:00.000Z", stale: false, items };
+function collectionResponse(collection: DiscoveryCollectionId, page = 1): DiscoveryCollectionResponse {
+  return {
+    collection,
+    updatedAt: "2026-08-29T00:00:00.000Z",
+    stale: false,
+    page,
+    pageSize: 10,
+    total: 25,
+    hasNext: page < 3,
+    items
+  };
 }
 
 function releaseResponse(itemId: string): DiscoveryReleaseResponse {
@@ -56,14 +65,19 @@ function releaseResponse(itemId: string): DiscoveryReleaseResponse {
 }
 
 function makeClient() {
-  const getDiscoveryCollection = vi.fn(async (collection: DiscoveryCollectionId) => collectionResponse(collection));
-  const getDiscoveryReleases = vi.fn(async (_collection: DiscoveryCollectionId, itemId: string) => releaseResponse(itemId));
-  const refreshDiscoveryReleases = vi.fn(async (_collection: DiscoveryCollectionId, itemId: string) => ({
+  const getDiscoveryCollection = vi.fn(async (collection: DiscoveryCollectionId, _csrfToken: string, page = 1) => collectionResponse(collection, page));
+  const getDiscoveryMediaReleases = vi.fn(async (_mediaType: "movie" | "tv", itemId: string) => releaseResponse(itemId));
+  const getDiscoveryMediaDetails = vi.fn(async (_mediaType: "movie" | "tv", itemId: string) => ({
+    itemId,
+    actors: [{ name: "演员甲" }],
+    directors: ["导演甲"]
+  }));
+  const refreshDiscoveryMediaReleases = vi.fn(async (_mediaType: "movie" | "tv", itemId: string) => ({
     ...releaseResponse(itemId),
     checkedAt: "2026-08-29T00:00:02.000Z"
   }));
-  const client = { getDiscoveryCollection, getDiscoveryReleases, refreshDiscoveryReleases } as unknown as ApiClient;
-  return { client, getDiscoveryCollection, getDiscoveryReleases, refreshDiscoveryReleases };
+  const client = { getDiscoveryCollection, getDiscoveryMediaReleases, getDiscoveryMediaDetails, refreshDiscoveryMediaReleases } as unknown as ApiClient;
+  return { client, getDiscoveryCollection, getDiscoveryMediaReleases, getDiscoveryMediaDetails, refreshDiscoveryMediaReleases };
 }
 
 afterEach(() => {
@@ -73,62 +87,62 @@ afterEach(() => {
 describe("useDiscovery", () => {
   it("loads a collection and progressively checks each visible item once", async () => {
     setVisibilityState("visible");
-    const { client, getDiscoveryCollection, getDiscoveryReleases } = makeClient();
+    const { client, getDiscoveryCollection, getDiscoveryMediaReleases } = makeClient();
     const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
 
     await waitFor(() => expect(hook.result.current.items).toHaveLength(2));
-    await waitFor(() => expect(getDiscoveryReleases).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getDiscoveryMediaReleases).toHaveBeenCalledTimes(2));
 
-    expect(getDiscoveryCollection).toHaveBeenCalledWith("movie-hot", "csrf-test");
+    expect(getDiscoveryCollection).toHaveBeenCalledWith("movie-hot", "csrf-test", 1, 10);
     expect(hook.result.current.availabilityById["1001"]?.status).toBe("available");
     expect(hook.result.current.availabilityById["1002"]?.status).toBe("unavailable");
 
     await act(async () => {
       await hook.result.current.ensureAvailability(items[0]);
     });
-    expect(getDiscoveryReleases).toHaveBeenCalledTimes(2);
+    expect(getDiscoveryMediaReleases).toHaveBeenCalledTimes(2);
   });
 
   it("loads discovery content while hidden but pauses PT checks until visible", async () => {
     setVisibilityState("hidden");
-    const { client, getDiscoveryReleases } = makeClient();
+    const { client, getDiscoveryMediaReleases } = makeClient();
     const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
 
     await waitFor(() => expect(hook.result.current.items).toHaveLength(2));
-    expect(getDiscoveryReleases).not.toHaveBeenCalled();
+    expect(getDiscoveryMediaReleases).not.toHaveBeenCalled();
 
     setVisibilityState("visible");
     act(() => document.dispatchEvent(new Event("visibilitychange")));
-    await waitFor(() => expect(getDiscoveryReleases).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getDiscoveryMediaReleases).toHaveBeenCalledTimes(2));
   });
 
   it("uses the cached ordinary check but forces a refresh through the refresh API", async () => {
     setVisibilityState("visible");
-    const { client, getDiscoveryReleases, refreshDiscoveryReleases } = makeClient();
+    const { client, getDiscoveryMediaReleases, refreshDiscoveryMediaReleases } = makeClient();
     const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
 
-    await waitFor(() => expect(getDiscoveryReleases).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getDiscoveryMediaReleases).toHaveBeenCalledTimes(2));
     await act(async () => {
       await hook.result.current.ensureAvailability(items[0]);
     });
-    expect(getDiscoveryReleases).toHaveBeenCalledTimes(2);
+    expect(getDiscoveryMediaReleases).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       await hook.result.current.refreshAvailability(items[0]);
     });
-    expect(refreshDiscoveryReleases).toHaveBeenCalledWith("movie-hot", items[0].id, "csrf-test");
-    expect(refreshDiscoveryReleases).toHaveBeenCalledTimes(1);
+    expect(refreshDiscoveryMediaReleases).toHaveBeenCalledWith("movie", items[0].id, "csrf-test", 10);
+    expect(refreshDiscoveryMediaReleases).toHaveBeenCalledTimes(1);
     expect(hook.result.current.availabilityById[items[0].id]?.checkedAt).toBe("2026-08-29T00:00:02.000Z");
   });
 
   it("reuses an in-flight refresh for concurrent checks instead of falling back to GET", async () => {
     setVisibilityState("hidden");
-    const { client, getDiscoveryReleases, refreshDiscoveryReleases } = makeClient();
+    const { client, getDiscoveryMediaReleases, refreshDiscoveryMediaReleases } = makeClient();
     let resolveRefresh: (response: DiscoveryReleaseResponse) => void = () => undefined;
     const pendingRefresh = new Promise<DiscoveryReleaseResponse>((resolve) => {
       resolveRefresh = resolve;
     });
-    refreshDiscoveryReleases.mockReturnValue(pendingRefresh);
+    refreshDiscoveryMediaReleases.mockReturnValue(pendingRefresh);
     const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
 
     await waitFor(() => expect(hook.result.current.items).toHaveLength(2));
@@ -141,10 +155,10 @@ describe("useDiscovery", () => {
       ordinary = hook.result.current.ensureAvailability(items[0]);
     });
 
-    await waitFor(() => expect(refreshDiscoveryReleases).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refreshDiscoveryMediaReleases).toHaveBeenCalledTimes(1));
     expect(second).toBe(first);
     expect(ordinary).toBe(first);
-    expect(getDiscoveryReleases).not.toHaveBeenCalled();
+    expect(getDiscoveryMediaReleases).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveRefresh({ ...releaseResponse(items[0].id), checkedAt: "2026-08-29T00:00:03.000Z" });
@@ -152,5 +166,24 @@ describe("useDiscovery", () => {
     });
     expect(hook.result.current.availabilityById[items[0].id]?.checkedAt).toBe("2026-08-29T00:00:03.000Z");
     expect(hook.result.current.checkingIds.has(items[0].id)).toBe(false);
+  });
+
+  it("loads later pages and aligns availability and actor requests to the active page", async () => {
+    setVisibilityState("hidden");
+    const { client, getDiscoveryCollection, getDiscoveryMediaReleases, getDiscoveryMediaDetails } = makeClient();
+    const hook = renderHook(() => useDiscovery(client, "csrf-test", true));
+
+    await waitFor(() => expect(hook.result.current.items).toHaveLength(2));
+    act(() => hook.result.current.setPage(2));
+    await waitFor(() => expect(getDiscoveryCollection).toHaveBeenCalledWith("movie-hot", "csrf-test", 2, 10));
+    await waitFor(() => expect(hook.result.current.page).toBe(2));
+
+    await act(async () => {
+      await hook.result.current.ensureAvailability(items[0]);
+      await hook.result.current.ensureDetails(items[0]);
+    });
+    expect(getDiscoveryMediaReleases).toHaveBeenCalledWith("movie", items[0].id, "csrf-test", 10);
+    expect(getDiscoveryMediaDetails).toHaveBeenCalledWith("movie", items[0].id, "csrf-test");
+    expect(hook.result.current.detailsById[items[0].id]?.actors).toEqual([{ name: "演员甲" }]);
   });
 });

@@ -1,10 +1,20 @@
 import { FormEvent, useState } from "react";
-import type { DiscoveryCollectionId, DiscoveryItem, GrabResponse, ReleaseSummary } from "../shared/contracts";
+import type {
+  DiscoveryActor,
+  DiscoveryActorWork,
+  DiscoveryCollectionId,
+  DiscoveryItem,
+  DiscoveryMedia,
+  GrabResponse,
+  ReleaseSummary
+} from "../shared/contracts";
 import { ApiError, apiClient, type ApiClient } from "./api";
 import { AppHeader } from "./components/AppHeader";
+import { ActorView } from "./components/ActorView";
 import { ChatThread } from "./components/ChatThread";
 import { DiscoveryBrowser } from "./components/DiscoveryBrowser";
-import { DiscoveryInspector } from "./components/DiscoveryInspector";
+import { MediaInspector } from "./components/MediaInspector";
+import { MediaSearchResults } from "./components/MediaSearchResults";
 import { ModeSwitch, type AppMode } from "./components/ModeSwitch";
 import { PairingGate } from "./components/PairingGate";
 import { QueryComposer } from "./components/QueryComposer";
@@ -14,6 +24,8 @@ import { ErrorMessage, LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
 import { useDiscovery } from "./hooks/useDiscovery";
+import { useDiscoveryActor } from "./hooks/useDiscoveryActor";
+import { useMediaInspector } from "./hooks/useMediaInspector";
 import { useServiceBootstrap } from "./hooks/useServiceBootstrap";
 import type { ChatMessage, SearchState, SelectionState } from "./types";
 import "./styles.css";
@@ -35,6 +47,17 @@ function initialAssistantMessage(total: number): string {
   return `找到 ${total} 个匹配，已按做种数和体积排序。`;
 }
 
+type MediaOrigin =
+  | { kind: "collection"; collection: DiscoveryCollectionId; page: number }
+  | { kind: "actor"; actorName: string }
+  | { kind: "search"; query: string };
+
+type ActorNavigationEntry = {
+  actorName: string | null;
+  item: DiscoveryMedia;
+  origin: MediaOrigin;
+};
+
 export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const bootstrap = useServiceBootstrap(client);
   const [sessionOverride, setSessionOverride] = useState<typeof bootstrap.session>(null);
@@ -50,6 +73,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [searchState, setSearchState] = useState<SearchState>("idle");
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [mediaSearchItems, setMediaSearchItems] = useState<DiscoveryMedia[]>([]);
+  const [mediaSearchLoading, setMediaSearchLoading] = useState(false);
+  const [mediaSearchError, setMediaSearchError] = useState<string | null>(null);
   const [releases, setReleases] = useState<ReleaseSummary[]>([]);
   const [resultTotal, setResultTotal] = useState(0);
   const [selection, setSelection] = useState<SelectionState | null>(null);
@@ -60,8 +86,19 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [grabResult, setGrabResult] = useState<GrabResponse | null>(null);
   const runtime = useRuntimeStatus(client, csrfToken, paired);
   const discovery = useDiscovery(client, csrfToken, paired);
-  const [selectedDiscoveryItem, setSelectedDiscoveryItem] = useState<DiscoveryItem | null>(null);
+  const [selectedMediaItem, setSelectedMediaItem] = useState<DiscoveryMedia | null>(null);
+  const [mediaOrigin, setMediaOrigin] = useState<MediaOrigin | null>(null);
+  const [selectedActorName, setSelectedActorName] = useState<string | null>(null);
+  const [actorHistory, setActorHistory] = useState<ActorNavigationEntry[]>([]);
   const [discoveryInspectorError, setDiscoveryInspectorError] = useState<string | null>(null);
+  const [discoveryDetailsError, setDiscoveryDetailsError] = useState<string | null>(null);
+  const actor = useDiscoveryActor(client, csrfToken, selectedActorName, paired && mode === "discover");
+  const standaloneMedia = useMediaInspector(
+    client,
+    csrfToken,
+    selectedMediaItem,
+    Boolean(selectedMediaItem && mediaOrigin && mediaOrigin.kind !== "collection")
+  );
   const runtimeStatus = paired ? (
     <RuntimeStatusBar
       storage={runtime.storage}
@@ -72,7 +109,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const refreshAllStatus = () => {
     void Promise.allSettled([bootstrap.refreshHealth(), runtime.refresh()]);
   };
-  const hasInspector = Boolean(selection || selectedDiscoveryItem);
+  const hasInspector = Boolean(selection || selectedMediaItem);
 
   const sessionFailure = !bootstrap.loading && !session && bootstrap.sessionError;
   const pairingView = !bootstrap.loading && !sessionFailure && !paired;
@@ -117,19 +154,37 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
     setSearchState("loading");
     setSearchError(null);
+    setMediaSearchItems([]);
+    setMediaSearchError(null);
+    setMediaSearchLoading(true);
     setReleases([]);
     setResultTotal(0);
     setSelection(null);
     setSelectionError(null);
     setInspectorExpanded(false);
     setGrabResult(null);
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
     setMessages((current) => [
       ...current,
       { id: messageId(), role: "user", text: nextQuery, createdAt: Date.now() }
     ]);
 
     try {
-      const response = await client.search({ query: nextQuery, limit: 20 }, csrfToken);
+      const [releaseResult, mediaResult] = await Promise.allSettled([
+        client.search({ query: nextQuery, limit: 20 }, csrfToken),
+        client.searchDiscoveryMedia(nextQuery, csrfToken, 10)
+      ]);
+      if (mediaResult.status === "fulfilled") {
+        setMediaSearchItems(mediaResult.value.items);
+        setMediaSearchError(null);
+      } else {
+        setMediaSearchItems([]);
+        setMediaSearchError("作品匹配暂时不可用");
+      }
+      setMediaSearchLoading(false);
+      if (releaseResult.status === "rejected") throw releaseResult.reason;
+      const response = releaseResult.value;
       setReleases(response.releases);
       setResultTotal(response.total);
       setMessages((current) => [
@@ -139,6 +194,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
       setQuery("");
       setSearchState("success");
     } catch (error) {
+      setMediaSearchLoading(false);
       const message = readableError(error);
       setSearchError(message);
       setSearchState("error");
@@ -193,36 +249,130 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     setSelection(null);
     setSelectionError(null);
     setGrabResult(null);
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
     if (nextMode === "search") {
-      setSelectedDiscoveryItem(null);
+      setSelectedActorName(null);
+      setActorHistory([]);
       setDiscoveryInspectorError(null);
+      setDiscoveryDetailsError(null);
     }
   };
 
   const handleCollectionChange = (collection: DiscoveryCollectionId) => {
     discovery.setCollection(collection);
     setInspectorExpanded(false);
-    setSelectedDiscoveryItem(null);
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
+    setSelectedActorName(null);
+    setActorHistory([]);
     setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
     resetReleaseSelection();
+  };
+
+  const handleDiscoveryPageChange = (page: number) => {
+    discovery.setPage(page);
+    setInspectorExpanded(false);
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
+    setSelectedActorName(null);
+    setActorHistory([]);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
+    resetReleaseSelection();
+  };
+
+  const handleMediaItem = (item: DiscoveryMedia, origin: MediaOrigin) => {
+    if (confirmLoading) return;
+    if (origin.kind !== "actor") {
+      setSelectedActorName(null);
+      setActorHistory([]);
+    }
+    setSelectedMediaItem(item);
+    setMediaOrigin(origin);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
+    resetReleaseSelection();
+    if (origin.kind === "collection") {
+      void Promise.all([discovery.ensureAvailability(item), discovery.ensureDetails(item)]).then(([availability, details]) => {
+        if (!availability) setDiscoveryInspectorError("这次片源检查没有完成，请稍后重试。");
+        if (!details) setDiscoveryDetailsError("演职员信息暂时不可用，可以稍后重试。");
+      });
+    }
   };
 
   const handleDiscoveryItem = (item: DiscoveryItem) => {
-    if (confirmLoading) return;
-    setSelectedDiscoveryItem(item);
+    handleMediaItem(item, { kind: "collection", collection: discovery.collection, page: discovery.page });
+  };
+
+  const handleSelectActor = (selectedActor: DiscoveryActor) => {
+    if (confirmLoading || !selectedMediaItem || !mediaOrigin) return;
+    setActorHistory((current) => [...current, {
+      actorName: selectedActorName,
+      item: selectedMediaItem,
+      origin: mediaOrigin
+    }]);
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
+    setSelectedActorName(selectedActor.name);
     setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
     resetReleaseSelection();
-    void discovery.ensureAvailability(item).then((result) => {
-      if (!result) setDiscoveryInspectorError("这次片源检查没有完成，请稍后重试。");
-    });
+  };
+
+  const handleActorBack = () => {
+    const previous = actorHistory[actorHistory.length - 1];
+    if (!previous) {
+      setSelectedActorName(null);
+      setSelectedMediaItem(null);
+      setMediaOrigin(null);
+      return;
+    }
+    setActorHistory((current) => current.slice(0, -1));
+    setSelectedActorName(previous.actorName);
+    setSelectedMediaItem(previous.item);
+    setMediaOrigin(previous.origin);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
+  };
+
+  const handleActorWork = (work: DiscoveryActorWork) => {
+    if (!selectedActorName) return;
+    handleMediaItem(work, { kind: "actor", actorName: selectedActorName });
+  };
+
+  const closeMediaInspector = () => {
+    if (confirmLoading) return;
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
+    setInspectorExpanded(false);
   };
 
   const retryDiscoveryItem = () => {
-    if (!selectedDiscoveryItem) return;
-    setDiscoveryInspectorError(null);
-    void discovery.refreshAvailability(selectedDiscoveryItem).then((result) => {
-      if (!result) setDiscoveryInspectorError("这次片源检查没有完成，请稍后重试。");
-    });
+    if (!selectedMediaItem || !mediaOrigin) return;
+    if (mediaOrigin.kind === "collection") {
+      setDiscoveryInspectorError(null);
+      void discovery.refreshAvailability(selectedMediaItem).then((result) => {
+        if (!result) setDiscoveryInspectorError("这次片源检查没有完成，请稍后重试。");
+      });
+      return;
+    }
+    standaloneMedia.retryAvailability();
+  };
+
+  const retryDiscoveryDetails = () => {
+    if (!selectedMediaItem || !mediaOrigin) return;
+    if (mediaOrigin.kind === "collection") {
+      setDiscoveryDetailsError(null);
+      void discovery.ensureDetails(selectedMediaItem).then((result) => {
+        if (!result) setDiscoveryDetailsError("演职员信息暂时不可用，可以稍后重试。");
+      });
+      return;
+    }
+    standaloneMedia.retryDetails();
   };
 
   const handleConfirm = async () => {
@@ -247,6 +397,47 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
       setConfirmLoading(false);
     }
   };
+
+  const collectionOrigin = mediaOrigin?.kind === "collection" ? mediaOrigin : null;
+  const selectedDetails = selectedMediaItem && collectionOrigin
+    ? discovery.detailsById[selectedMediaItem.id] ?? null
+    : standaloneMedia.details;
+  const selectedDetailsLoading = Boolean(selectedMediaItem && collectionOrigin
+    ? discovery.detailsLoadingIds.has(selectedMediaItem.id)
+    : standaloneMedia.detailsLoading);
+  const selectedDetailsError = collectionOrigin ? discoveryDetailsError : standaloneMedia.detailsError;
+  const selectedReleases = selectedMediaItem && collectionOrigin
+    ? discovery.availabilityById[selectedMediaItem.id] ?? null
+    : standaloneMedia.releaseResponse;
+  const selectedReleaseLoading = Boolean(selectedMediaItem && collectionOrigin
+    ? discovery.checkingIds.has(selectedMediaItem.id)
+    : standaloneMedia.releaseLoading);
+  const selectedReleaseError = collectionOrigin ? discoveryInspectorError : standaloneMedia.releaseError;
+
+  const mediaInspector = selectedMediaItem ? (
+    <div className="discovery-inspector-stack">
+      <MediaInspector
+        item={selectedMediaItem}
+        details={selectedDetails}
+        detailsLoading={selectedDetailsLoading}
+        detailsError={selectedDetailsError}
+        releaseResponse={selectedReleases}
+        loading={selectedReleaseLoading}
+        error={selectedReleaseError}
+        selectedReleaseId={null}
+        selectingId={selectingId}
+        onSelectRelease={(release) => {
+          const releaseIndex = selectedReleases?.releases.findIndex((candidate) => candidate.id === release.id) ?? -1;
+          const index = releaseIndex >= 0 ? releaseIndex + 1 : 1;
+          void handleSelect(release, index);
+        }}
+        onClose={closeMediaInspector}
+        onRetry={retryDiscoveryItem}
+        onRetryDetails={retryDiscoveryDetails}
+        onSelectActor={handleSelectActor}
+      />
+    </div>
+  ) : null;
 
   if (bootstrap.loading) {
     return (
@@ -308,18 +499,36 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                 <ModeSwitch mode={mode} onChange={handleModeChange} />
               </div>
               {healthError ? <p className="workspace-warning" role="status">{healthError}</p> : null}
-              <DiscoveryBrowser
-                collection={discovery.collection}
-                items={discovery.items}
-                loading={discovery.loading}
-                error={discovery.error}
-                selectedItemId={selectedDiscoveryItem?.id ?? null}
-                availabilityById={discovery.availabilityById}
-                checkingIds={discovery.checkingIds}
-                onCollectionChange={handleCollectionChange}
-                onSelectItem={handleDiscoveryItem}
-                onRetry={discovery.retryCollection}
-              />
+              {selectedActorName ? (
+                <ActorView
+                  profile={actor.profile}
+                  page={actor.page}
+                  loading={actor.loading}
+                  error={actor.error}
+                  onBack={handleActorBack}
+                  onSelectWork={handleActorWork}
+                  onPageChange={actor.setPage}
+                  onRetry={actor.retry}
+                />
+              ) : (
+                <DiscoveryBrowser
+                  collection={discovery.collection}
+                  page={discovery.page}
+                  pageSize={discovery.pageSize}
+                  items={discovery.items}
+                  total={discovery.total}
+                  hasNext={discovery.hasNext}
+                  loading={discovery.loading}
+                  error={discovery.error}
+                  selectedItemId={selectedMediaItem?.id ?? null}
+                  availabilityById={discovery.availabilityById}
+                  checkingIds={discovery.checkingIds}
+                  onCollectionChange={handleCollectionChange}
+                  onPageChange={handleDiscoveryPageChange}
+                  onSelectItem={handleDiscoveryItem}
+                  onRetry={discovery.retryCollection}
+                />
+              )}
             </section>
 
             {selection ? (
@@ -340,30 +549,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                 onConfirm={handleConfirm}
                 onRefreshRuntime={() => void runtime.refresh()}
               />
-            ) : selectedDiscoveryItem ? (
-              <div className="discovery-inspector-stack">
-                <DiscoveryInspector
-                  item={selectedDiscoveryItem}
-                  releaseResponse={discovery.availabilityById[selectedDiscoveryItem.id] ?? null}
-                  loading={discovery.checkingIds.has(selectedDiscoveryItem.id)}
-                  error={discoveryInspectorError}
-                  selectedReleaseId={null}
-                  selectingId={selectingId}
-                  onSelectRelease={(release) => {
-                    const response = discovery.availabilityById[selectedDiscoveryItem.id];
-                    const releaseIndex = response?.releases.findIndex((candidate) => candidate.id === release.id) ?? -1;
-                    const index = releaseIndex >= 0 ? releaseIndex + 1 : 1;
-                    void handleSelect(release, index);
-                  }}
-                  onClose={() => {
-                    setSelectedDiscoveryItem(null);
-                    setDiscoveryInspectorError(null);
-                    setInspectorExpanded(false);
-                  }}
-                  onRetry={retryDiscoveryItem}
-                />
-              </div>
-            ) : null}
+            ) : mediaInspector}
           </>
         ) : (
           <>
@@ -379,6 +565,13 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
               <div className="results-scroll">
                 {searchState === "loading" ? <LoadingState label="正在查找片源…" /> : null}
                 {searchState === "error" && searchError ? <ErrorMessage message={searchError} /> : null}
+                <MediaSearchResults
+                  items={mediaSearchItems}
+                  loading={mediaSearchLoading}
+                  error={mediaSearchError}
+                  selectedItemId={mediaOrigin?.kind === "search" ? selectedMediaItem?.id ?? null : null}
+                  onSelect={(item) => handleMediaItem(item, { kind: "search", query: item.title })}
+                />
                 {searchState !== "loading" ? (
                   <ReleaseList
                     releases={releases}
@@ -409,7 +602,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                 onConfirm={handleConfirm}
                 onRefreshRuntime={() => void runtime.refresh()}
               />
-            ) : null}
+            ) : mediaInspector}
 
             <div className="composer-dock">
               <QueryComposer

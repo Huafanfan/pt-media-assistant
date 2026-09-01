@@ -68,24 +68,67 @@ export type DiscoveryCollectionId =
   | "tv-weekly"
   | "top250";
 
-export type DiscoveryItem = {
+/** Canonical media summary shared by every discovery entry point. */
+export type DiscoveryMedia = {
   id: string;
   title: string;
+  posterUrl?: string;
   originalTitle?: string;
   year?: string;
   rating?: number;
   ratingCount?: number;
-  rank: number;
   mediaType: "movie" | "tv";
   genres: string[];
   summary: string;
+  role?: string;
   sourceUrl: string;
+};
+
+export type DiscoveryItem = DiscoveryMedia & {
+  rank: number;
+};
+
+export type DiscoveryItemDetails = {
+  itemId: string;
+  actors: DiscoveryActor[];
+  directors: string[];
+};
+
+/** The browser only needs the display name to open the actor dimension. */
+export type DiscoveryActor = {
+  name: string;
+  id?: string;
+};
+
+export type DiscoveryActorWork = DiscoveryMedia;
+
+export type DiscoveryActorProfile = {
+  id: string;
+  name: string;
+  latinName?: string;
+  avatarUrl?: string;
+  intro: string;
+  works: DiscoveryActorWork[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasNext: boolean;
+};
+
+export type DiscoveryMediaSearchResponse = {
+  query: string;
+  total: number;
+  items: DiscoveryMedia[];
 };
 
 export type DiscoveryCollectionResponse = {
   collection: DiscoveryCollectionId;
   updatedAt: string;
   stale: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasNext: boolean;
   items: DiscoveryItem[];
 };
 

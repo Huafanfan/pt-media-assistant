@@ -1,10 +1,15 @@
 import { Circle, CircleDashed, CircleDot, RefreshCw, Star, X } from "lucide-react";
-import type { DiscoveryItem, DiscoveryReleaseResponse, ReleaseSummary } from "../../shared/contracts";
+import { useEffect, useState } from "react";
+import type { DiscoveryActor, DiscoveryItemDetails, DiscoveryMedia, DiscoveryReleaseResponse, ReleaseSummary } from "../../shared/contracts";
+import { DiscoveryPoster } from "./DiscoveryPoster";
 import { formatBytes } from "./ReleaseList";
 import "../discovery.css";
 
-export type DiscoveryInspectorProps = {
-  item: DiscoveryItem | null;
+export type MediaInspectorProps = {
+  item: DiscoveryMedia | null;
+  details: DiscoveryItemDetails | null;
+  detailsLoading: boolean;
+  detailsError: string | null;
   releaseResponse: DiscoveryReleaseResponse | null;
   loading: boolean;
   error: string | null;
@@ -13,7 +18,11 @@ export type DiscoveryInspectorProps = {
   onSelectRelease: (release: ReleaseSummary) => void;
   onClose: () => void;
   onRetry: () => void;
+  onRetryDetails: () => void;
+  onSelectActor?: (actor: DiscoveryActor) => void;
 };
+
+const RELEASE_PAGE_SIZE = 10;
 
 function formatRating(rating: number | undefined): string {
   return typeof rating === "number" && Number.isFinite(rating) ? rating.toFixed(1) : "—";
@@ -41,8 +50,11 @@ function statusSummary(response: DiscoveryReleaseResponse): string {
   return "暂未找到";
 }
 
-export function DiscoveryInspector({
+export function MediaInspector({
   item,
+  details,
+  detailsLoading,
+  detailsError,
   releaseResponse,
   loading,
   error,
@@ -50,11 +62,28 @@ export function DiscoveryInspector({
   selectingId,
   onSelectRelease,
   onClose,
-  onRetry
-}: DiscoveryInspectorProps) {
+  onRetry,
+  onRetryDetails,
+  onSelectActor
+}: MediaInspectorProps) {
   const itemHeading = item?.title ?? "候选片源";
   const hasResponse = Boolean(releaseResponse && !error);
   const releases = releaseResponse?.releases ?? [];
+  const releaseTotal = Math.max(releases.length, releaseResponse?.total ?? 0);
+  const [releasePage, setReleasePage] = useState(1);
+  const releasePageCount = Math.max(1, Math.ceil(releaseTotal / RELEASE_PAGE_SIZE));
+  const activeReleasePage = Math.min(releasePage, releasePageCount);
+  const releaseStart = (activeReleasePage - 1) * RELEASE_PAGE_SIZE;
+  const visibleReleases = releases.slice(releaseStart, releaseStart + RELEASE_PAGE_SIZE);
+  const releaseEnd = releaseStart + visibleReleases.length;
+
+  useEffect(() => {
+    setReleasePage(1);
+  }, [item?.id]);
+
+  useEffect(() => {
+    if (releasePage > releasePageCount) setReleasePage(releasePageCount);
+  }, [releasePage, releasePageCount]);
 
   return (
     <aside className={`discovery-inspector${item ? "" : " is-empty"}`} aria-labelledby="discovery-inspector-title">
@@ -85,12 +114,59 @@ export function DiscoveryInspector({
         ) : (
           <>
             <section className="discovery-selected-item" aria-label="所选榜单条目">
-              <div className="discovery-selected-item-rating">
-                <Star size={17} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
-                <span>{formatRating(item.rating)}</span>
+              <div className="discovery-selected-item-overview">
+                <DiscoveryPoster
+                  src={item.posterUrl}
+                  title={item.title}
+                  alt={`${item.title} 海报`}
+                  className="discovery-selected-item-poster"
+                />
+                <div className="discovery-selected-item-copy">
+                  <div className="discovery-selected-item-rating">
+                    <Star size={17} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
+                    <span>{formatRating(item.rating)}</span>
+                  </div>
+                  <p>{item.genres.length > 0 ? item.genres.join(" / ") : "未分类"}</p>
+                  <p className="discovery-selected-item-summary">{item.summary || "暂无简介"}</p>
+                </div>
               </div>
-              <p>{item.genres.length > 0 ? item.genres.join(" / ") : "未分类"}</p>
-              <p className="discovery-selected-item-summary">{item.summary || "暂无简介"}</p>
+              <section className="discovery-cast" aria-label="演职员">
+                <div className="discovery-cast-row">
+                  <span className="discovery-cast-label">主演</span>
+                  {detailsLoading ? <span className="discovery-cast-muted">正在读取…</span> : null}
+                  {!detailsLoading && detailsError ? (
+                    <>
+                      <span className="discovery-cast-muted">暂时不可用</span>
+                      <button className="discovery-inline-action" type="button" onClick={onRetryDetails}>重试</button>
+                    </>
+                  ) : null}
+                  {!detailsLoading && !detailsError && details?.actors.length ? (
+                    <span className="discovery-cast-names">
+                      {details.actors.map((actor, index) => (
+                        <span key={`${actor.id ?? actor.name}-${index}`} className="discovery-cast-person">
+                          {index > 0 ? <span className="discovery-cast-separator" aria-hidden="true"> · </span> : null}
+                          <button
+                            className="discovery-actor-button"
+                            type="button"
+                            onClick={() => onSelectActor?.(actor)}
+                          >
+                            {actor.name}
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                  {!detailsLoading && !detailsError && details && details.actors.length === 0 ? (
+                    <span className="discovery-cast-muted">暂无资料</span>
+                  ) : null}
+                </div>
+                {!detailsLoading && !detailsError && details?.directors.length ? (
+                  <div className="discovery-cast-row">
+                    <span className="discovery-cast-label">导演</span>
+                    <span className="discovery-cast-names">{details.directors.join(" · ")}</span>
+                  </div>
+                ) : null}
+              </section>
             </section>
 
             <section className="discovery-release-section" aria-labelledby="discovery-release-title">
@@ -99,7 +175,7 @@ export function DiscoveryInspector({
                   <h3 id="discovery-release-title">候选片源</h3>
                   <p>
                     {hasResponse
-                      ? `${statusSummary(releaseResponse as DiscoveryReleaseResponse)} · ${releases.length} 个当前候选`
+                      ? `${statusSummary(releaseResponse as DiscoveryReleaseResponse)} · ${visibleReleases.length} 个当前候选`
                       : "选择片源后仍需在现有面板确认下载"}
                   </p>
                 </div>
@@ -155,7 +231,7 @@ export function DiscoveryInspector({
                     <span>做种</span>
                   </div>
                   <div className="discovery-release-list" role="radiogroup" aria-label="候选片源列表">
-                    {releases.map((release) => {
+                    {visibleReleases.map((release) => {
                       const selected = release.id === selectedReleaseId;
                       const selecting = release.id === selectingId;
                       const disabled = Boolean(selectingId && !selecting);
@@ -193,6 +269,31 @@ export function DiscoveryInspector({
                       );
                     })}
                   </div>
+                  {releasePageCount > 1 ? (
+                    <nav className="discovery-pagination discovery-release-pagination" aria-label="候选片源翻页">
+                      <span className="discovery-pagination-summary">
+                        第 {activeReleasePage} 页 · {releaseStart + 1}–{releaseEnd} / {releaseTotal}
+                      </span>
+                      <div className="discovery-pagination-actions">
+                        <button
+                          className="discovery-pagination-button"
+                          type="button"
+                          disabled={activeReleasePage <= 1}
+                          onClick={() => setReleasePage((current) => Math.max(1, current - 1))}
+                        >
+                          上一页
+                        </button>
+                        <button
+                          className="discovery-pagination-button is-primary"
+                          type="button"
+                          disabled={activeReleasePage >= releasePageCount}
+                          onClick={() => setReleasePage((current) => Math.min(releasePageCount, current + 1))}
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    </nav>
+                  ) : null}
                 </>
               )}
             </section>
@@ -205,4 +306,6 @@ export function DiscoveryInspector({
   );
 }
 
-export default DiscoveryInspector;
+export const DiscoveryInspector = MediaInspector;
+export type DiscoveryInspectorProps = MediaInspectorProps;
+export default MediaInspector;

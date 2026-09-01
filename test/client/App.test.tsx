@@ -25,6 +25,7 @@ const release = {
 const discoveryItem = {
   id: "36808876",
   title: "奥德赛",
+  posterUrl: "/api/discovery/collections/movie-hot/items/36808876/poster?page=1&limit=10",
   originalTitle: "The Odyssey",
   year: "2026",
   rating: 8.5,
@@ -53,11 +54,37 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
       elapsedMs: 42,
       releases: [release]
     }),
+    searchDiscoveryMedia: vi.fn().mockResolvedValue({ query: "", total: 0, items: [] }),
     getDiscoveryCollection: vi.fn().mockResolvedValue({
       collection: "movie-hot" as const,
       updatedAt: "2026-08-29T00:00:00.000Z",
       stale: false,
+      page: 1,
+      pageSize: 10,
+      total: 1,
+      hasNext: false,
       items: [discoveryItem]
+    }),
+    getDiscoveryDetails: vi.fn().mockResolvedValue({
+      itemId: discoveryItem.id,
+      actors: [{ name: "演员甲" }, { name: "演员乙" }],
+      directors: ["导演甲"]
+    }),
+    getDiscoveryMediaDetails: vi.fn().mockResolvedValue({
+      itemId: discoveryItem.id,
+      actors: [{ name: "演员甲" }, { name: "演员乙" }],
+      directors: ["导演甲"]
+    }),
+    getDiscoveryActor: vi.fn().mockResolvedValue({
+      id: "actor-1",
+      name: "演员甲",
+      latinName: "Actor A",
+      intro: "演员 / 导演",
+      works: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      hasNext: false
     }),
     getDiscoveryReleases: vi.fn().mockResolvedValue({
       itemId: discoveryItem.id,
@@ -67,7 +94,23 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
       total: 1,
       releases: [release]
     }),
+    getDiscoveryMediaReleases: vi.fn().mockResolvedValue({
+      itemId: discoveryItem.id,
+      query: "The Odyssey 2026",
+      status: "available" as const,
+      checkedAt: "2026-08-29T00:00:01.000Z",
+      total: 1,
+      releases: [release]
+    }),
     refreshDiscoveryReleases: vi.fn().mockResolvedValue({
+      itemId: discoveryItem.id,
+      query: "The Odyssey 2026",
+      status: "available" as const,
+      checkedAt: "2026-08-29T00:00:02.000Z",
+      total: 1,
+      releases: [release]
+    }),
+    refreshDiscoveryMediaReleases: vi.fn().mockResolvedValue({
       itemId: discoveryItem.id,
       query: "The Odyssey 2026",
       status: "available" as const,
@@ -136,12 +179,50 @@ describe("片源助手客户端", () => {
     expect(await screen.findByText("奥德赛")).not.toBeNull();
     expect(await screen.findByText("有资源 1")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: /奥德赛，第 1 名/ }));
+    expect(await screen.findByRole("button", { name: "演员甲" })).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "演员乙" })).not.toBeNull();
     expect(await screen.findByText(release.title)).not.toBeNull();
     await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
 
     expect(await screen.findByText("已选择 · 01")).not.toBeNull();
     expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
     expect(client.grab).not.toHaveBeenCalled();
+  });
+
+  it("opens the actor index and returns to the selected work", async () => {
+    const client = makeClient();
+    vi.mocked(client.getDiscoveryActor).mockResolvedValue({
+      id: "actor-1",
+      name: "演员甲",
+      latinName: "Actor A",
+      intro: "演员 / 导演",
+      works: [{
+        id: "work-1",
+        title: "演员甲的电影",
+        year: "2025",
+        rating: 8.8,
+        mediaType: "movie",
+        genres: ["剧情"],
+        summary: "一段故事。",
+        sourceUrl: "https://movie.douban.com/subject/work-1/"
+      }],
+      page: 1,
+      pageSize: 10,
+      total: 1,
+      hasNext: false
+    });
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /奥德赛，第 1 名/ }));
+    await user.click(await screen.findByRole("button", { name: "演员甲" }));
+
+    expect(await screen.findByRole("heading", { name: "演员甲" })).toBeInTheDocument();
+    expect(await screen.findByText("演员甲的电影")).toBeInTheDocument();
+    expect(client.getDiscoveryActor).toHaveBeenCalledWith("演员甲", "csrf-test", 1, 10);
+
+    await user.click(screen.getByRole("button", { name: "返回作品详情" }));
+    expect(await screen.findByRole("heading", { name: "奥德赛", level: 2 })).toBeInTheDocument();
   });
 
   it("uses the forced refresh API for discovery inspector retries", async () => {
@@ -153,12 +234,13 @@ describe("片源助手客户端", () => {
     await screen.findByText(release.title);
     await user.click(screen.getByRole("button", { name: "重新检查片源" }));
 
-    await waitFor(() => expect(client.refreshDiscoveryReleases).toHaveBeenCalledWith(
-      "movie-hot",
+    await waitFor(() => expect(client.refreshDiscoveryMediaReleases).toHaveBeenCalledWith(
+      "movie",
       discoveryItem.id,
-      "csrf-test"
+      "csrf-test",
+      10
     ));
-    expect(client.getDiscoveryReleases).toHaveBeenCalledWith("movie-hot", discoveryItem.id, "csrf-test");
+    expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith("movie", discoveryItem.id, "csrf-test", 10);
   });
 
   it("renders a user query, deterministic assistant message, and release row", async () => {
@@ -171,6 +253,47 @@ describe("片源助手客户端", () => {
     expect(screen.getByText("找到 1 个匹配，已按做种数和体积排序。")).not.toBeNull();
     expect(screen.getByRole("button", { name: "选择" })).not.toBeNull();
     expect(client.search).toHaveBeenCalledWith({ query: "星际穿越", limit: 20 }, "csrf-test");
+  });
+
+  it("opens title suggestions in the same media inspector as discovery entries", async () => {
+    const client = makeClient();
+    const media = {
+      id: "1293000",
+      title: "星际穿越",
+      posterUrl: "/api/discovery/media/movie/1293000/poster",
+      originalTitle: "Interstellar",
+      year: "2014",
+      rating: 8.6,
+      mediaType: "movie" as const,
+      genres: ["科幻"],
+      summary: "一支探险队穿越虫洞寻找新家园。",
+      sourceUrl: "https://movie.douban.com/subject/1293000/"
+    };
+    vi.mocked(client.searchDiscoveryMedia).mockResolvedValue({ query: "星际穿越", total: 1, items: [media] });
+    vi.mocked(client.getDiscoveryMediaDetails).mockResolvedValue({
+      itemId: media.id,
+      actors: [{ name: "演员甲" }],
+      directors: ["导演甲"]
+    });
+    vi.mocked(client.getDiscoveryMediaReleases).mockResolvedValue({
+      itemId: media.id,
+      query: "Interstellar 2014",
+      status: "available",
+      checkedAt: "2026-08-29T00:00:01.000Z",
+      total: 1,
+      releases: [release]
+    });
+    render(<App client={client} />);
+    await searchOnce(client);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "星际穿越，2014，电影" }));
+
+    expect(await screen.findByRole("heading", { name: "星际穿越", level: 2 })).toBeInTheDocument();
+    expect(await screen.findAllByText(release.title)).not.toHaveLength(0);
+    await waitFor(() => {
+      expect(client.getDiscoveryMediaDetails).toHaveBeenCalledWith("movie", media.id, "csrf-test");
+      expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith("movie", media.id, "csrf-test", 10);
+    });
   });
 
   it("previews on selection and only sends confirm:true after explicit grab", async () => {

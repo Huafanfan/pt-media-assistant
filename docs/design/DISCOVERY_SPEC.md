@@ -15,9 +15,15 @@ These PNG concepts are local visual references only. They are intentionally igno
 
 - Primary modes: `发现`, `搜索`.
 - Discovery collections: `热门电影`, `口碑电影`, `热门剧集`, `口碑剧集`, `Top 250`.
-- Discovery row fields: rank, Chinese title, optional original title, year, rating, genres, one-line summary, PT availability.
+- Discovery row fields: rank, poster thumbnail, Chinese title, optional original title, year, rating, genres, one-line summary, PT availability.
+- Discovery pages default to 10 items. The response includes page, page size, total count, and whether another page exists; previous/next controls load later pages without leaving discovery mode.
+- Selecting an item loads its bounded subject details on demand: poster, summary, up to 12 clickable actor names, and director names. Selecting an actor opens an actor-index view with profile metadata and a paged movie/TV filmography, with a back action returning to the selected work.
+- Release candidates are fetched as one bounded server snapshot of up to 50 entries. The inspector shows 10 entries per page locally, so candidate pagination does not create another Prowlarr request; its refresh control replaces the server snapshot explicitly.
+- Every movie/TV entry is normalized into the same media entity before rendering. Collection rows, actor filmography entries, and movie/TV search suggestions all open the same media inspector; the entry source changes navigation context only, never the detail layout or release workflow.
+- A movie/TV search suggestion is an optional companion result to the existing direct PT search. Selecting it opens the same media inspector, whose release candidates are queried by canonical media type and subject id. A query with no Douban work match still keeps the direct PT release list and its existing explicit preview flow.
 - Availability states: `待检查`, `检查中`, `有资源 N`, `可能匹配 N`, `暂未找到`.
-- Availability results are cached by the backend for up to 24 hours per collection, item, and result limit. The inspector refresh control explicitly requests a server-side refresh; it does not rely on browser-only cache invalidation.
+- Availability results are cached by the backend for up to 24 hours per collection, page, item, and result limit. The inspector refresh control explicitly requests a server-side refresh; it does not rely on browser-only cache invalidation.
+- Collection pages, subject details, and poster bytes are cached by the backend for a short TTL. Poster bytes are served through a same-origin route after the server validates the fixed Douban image host allowlist.
 - Desktop: discovery navigation and list occupy the available page width until a release is selected; the existing inspector then remains the third column. Runtime status stays as a compact second row under the global service-health line.
 - Mobile: the discovery list is the primary surface; release candidates appear as a bottom sheet. Final download confirmation remains a separate explicit action.
 
@@ -47,9 +53,12 @@ These PNG concepts are local visual references only. They are intentionally igno
 
 - Mode switch: two code-native buttons with one selected state.
 - Collection tabs: a semantic tab list; desktop may also render as a left navigation rail, mobile scrolls horizontally.
-- Discovery row: open editorial list item, not a generic card. Selected row gets one accent outline and subtle surface lift.
+- Discovery row: open editorial list item with a restrained poster thumbnail, not a generic card. Selected row gets one accent outline and subtle surface lift.
+- Pagination: quiet range summary with previous/next controls below the list; disabled controls communicate the first and last reachable page.
+- Media inspector: one reusable selected-work component pairs a larger poster with rating, genres, summary, compact actor/director rows, cached PT candidates, local candidate paging, refresh, and the existing explicit download confirmation. Actor names use quiet underlined action text so the actor index is discoverable without adding another global navigation layer.
+- Actor index: profile header with portrait, name, Latin name and bounded intro; below it, a poster grid separates movies and TV works through compact labels and supports previous/next paging.
 - Availability: functional text plus spinner/check state; green is reserved for confirmed seeded releases.
-- Release inspector: compact radio-style release rows; selected row uses the same accent family.
+- Release inspector: compact radio-style release rows with local 10-item paging; selected row uses the same accent family.
 - Runtime status: existing storage and download sections remain visually subordinate to the active selection.
 
 ## Responsive behavior
@@ -66,10 +75,15 @@ These PNG concepts are local visual references only. They are intentionally igno
 2. Loading a collection never creates a PT request.
 3. Visible items are checked progressively, one at a time; hidden documents pause the queue.
 4. Selecting a discovery item prioritizes its availability check and opens the release inspector.
-5. Selecting a release performs the existing grab preview only.
-6. Only the existing explicit `加入下载` confirmation may create a qBittorrent task.
-7. The release inspector's refresh control may explicitly refresh the selected item's PT availability result through the protected backend refresh action.
-8. Runtime status is always available as a compact header row; detailed storage and download sections appear only in the relevant selection inspector.
+5. Selecting a discovery item also requests its subject details without blocking the PT availability result.
+6. Changing pages replaces only the discovery list, resets the selected discovery item, and never creates a PT request for hidden pages.
+7. Selecting a release performs the existing grab preview only.
+8. Only the existing explicit `加入下载` confirmation may create a qBittorrent task.
+9. The release inspector's refresh control may explicitly refresh the selected item's PT availability result through the protected backend refresh action.
+10. Runtime status is always available as a compact header row; detailed storage and download sections appear only in the relevant selection inspector.
+11. Selecting an actor replaces the discovery list with the actor index and retains the originating item for the back action; changing actor-work pages requests only the actor profile endpoint.
+12. Selecting a work from the actor index opens the reusable media inspector in the same workspace; it never navigates to Douban. The actor index remains available behind the inspector until the user closes it or goes back.
+13. Selecting a movie/TV search suggestion opens the same reusable media inspector. Direct PT release rows remain available for queries that do not resolve to a media entity.
 
 ## Allowed first-viewport copy
 
@@ -83,6 +97,6 @@ These PNG concepts are local visual references only. They are intentionally igno
 - `Top 250`
 - Availability strings listed above
 - `检查片源`, `重新检查`, `重新检查片源`
-- Existing service health, NAS, download activity, release metadata, and explicit download-confirmation copy
+- Existing service health, NAS, download activity, release metadata, pagination, actor/director, and explicit download-confirmation copy
 
-No marketing hero, decorative eyebrow, fake analytics, poster placeholder copy, or additional navigation is permitted.
+No marketing hero, decorative eyebrow, fake analytics, or additional navigation is permitted. A failed poster uses a quiet visual fallback without explanatory placeholder copy.

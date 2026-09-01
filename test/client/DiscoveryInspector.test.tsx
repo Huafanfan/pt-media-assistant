@@ -7,6 +7,7 @@ import { DiscoveryInspector } from "../../src/client/components/DiscoveryInspect
 const item: DiscoveryItem = {
   id: "subject-4",
   title: "百年孤独 第二季",
+  posterUrl: "/api/discovery/collections/tv-hot/items/subject-4/poster?page=1&limit=10",
   originalTitle: "Cien Años de Soledad S02",
   year: "2024",
   rating: 9.3,
@@ -58,6 +59,9 @@ const response: DiscoveryReleaseResponse = {
 function renderInspector(overrides: Partial<React.ComponentProps<typeof DiscoveryInspector>> = {}) {
   const props: React.ComponentProps<typeof DiscoveryInspector> = {
     item,
+    details: null,
+    detailsLoading: false,
+    detailsError: null,
     releaseResponse: response,
     loading: false,
     error: null,
@@ -66,6 +70,7 @@ function renderInspector(overrides: Partial<React.ComponentProps<typeof Discover
     onSelectRelease: vi.fn(),
     onClose: vi.fn(),
     onRetry: vi.fn(),
+    onRetryDetails: vi.fn(),
     ...overrides
   };
   render(<DiscoveryInspector {...props} />);
@@ -75,9 +80,15 @@ function renderInspector(overrides: Partial<React.ComponentProps<typeof Discover
 describe("DiscoveryInspector", () => {
   it("renders the selected item and radio-style candidate releases", async () => {
     const user = userEvent.setup();
-    const props = renderInspector({ selectedReleaseId: "release-1" });
+    const props = renderInspector({
+      selectedReleaseId: "release-1",
+      details: { itemId: item.id, actors: [{ name: "演员甲" }, { name: "演员乙" }], directors: ["导演甲"] }
+    });
 
     expect(screen.getByRole("heading", { name: "百年孤独 第二季" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "演员甲" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "演员乙" })).toBeInTheDocument();
+    expect(screen.getByText("导演甲")).toBeInTheDocument();
     expect(screen.getByText("1080p")).toBeInTheDocument();
     expect(screen.getByText("21.3 GB")).toBeInTheDocument();
     expect(screen.getByText("免费")).toBeInTheDocument();
@@ -116,5 +127,28 @@ describe("DiscoveryInspector", () => {
     await user.click(screen.getByRole("button", { name: "关闭候选片源" }));
     expect(errorProps.onClose).toHaveBeenCalledTimes(1);
     expect(loadingProps.onRetry).not.toHaveBeenCalled();
+  });
+
+  it("paginates the cached candidate snapshot without losing candidate order", async () => {
+    const user = userEvent.setup();
+    const releases = Array.from({ length: 12 }, (_, index) => release({
+      id: `release-${index + 1}`,
+      title: `Candidate ${index + 1}`
+    }));
+    cleanup();
+    renderInspector({
+      releaseResponse: { ...response, total: releases.length, releases }
+    });
+
+    expect(screen.getByText("Candidate 1")).toBeInTheDocument();
+    expect(screen.getByText("Candidate 10")).toBeInTheDocument();
+    expect(screen.queryByText("Candidate 11")).not.toBeInTheDocument();
+    expect(screen.getByText("第 1 页 · 1–10 / 12")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.queryByText("Candidate 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Candidate 11")).toBeInTheDocument();
+    expect(screen.getByText("Candidate 12")).toBeInTheDocument();
+    expect(screen.getByText("第 2 页 · 11–12 / 12")).toBeInTheDocument();
   });
 });
