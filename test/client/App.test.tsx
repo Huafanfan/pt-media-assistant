@@ -37,6 +37,19 @@ const discoveryItem = {
   sourceUrl: "https://movie.douban.com/subject/36808876/"
 };
 
+const searchMediaItem = {
+  id: "1293000",
+  title: "星际穿越",
+  posterUrl: "/api/discovery/media/movie/1293000/poster",
+  originalTitle: "Interstellar",
+  year: "2014",
+  rating: 8.6,
+  mediaType: "movie" as const,
+  genres: ["科幻"],
+  summary: "一支探险队穿越虫洞寻找新家园。",
+  sourceUrl: "https://movie.douban.com/subject/1293000/"
+};
+
 function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted: true, message: "已发送", initialState: "started" as const }) } = {}) {
   const client: ApiClient = {
     getSession: vi.fn().mockResolvedValue({ paired, csrfToken: paired ? "csrf-test" : undefined }),
@@ -54,7 +67,7 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
       elapsedMs: 42,
       releases: [release]
     }),
-    searchDiscoveryMedia: vi.fn().mockResolvedValue({ query: "", total: 0, items: [] }),
+    searchDiscoveryMedia: vi.fn().mockResolvedValue({ query: "", total: 1, items: [searchMediaItem] }),
     getDiscoveryCollection: vi.fn().mockResolvedValue({
       collection: "movie-hot" as const,
       updatedAt: "2026-08-29T00:00:00.000Z",
@@ -142,10 +155,10 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
 async function searchOnce(client: ApiClient) {
   const user = userEvent.setup();
   await user.click(await screen.findByRole("tab", { name: "搜索" }));
-  const input = await screen.findByPlaceholderText("输入片名、年份或豆瓣链接");
+  const input = await screen.findByPlaceholderText("输入电影或剧集名称");
   await user.type(input, "星际穿越");
   await user.click(screen.getByRole("button", { name: "发送搜索" }));
-  await screen.findByText("Interstellar.2014.2160p.BluRay.x265.10bit.AAC5.1-TJUPT");
+  await screen.findByRole("button", { name: "星际穿越，2014，电影" });
   return user;
 }
 
@@ -167,7 +180,7 @@ describe("片源助手客户端", () => {
     await user.click(screen.getByRole("button", { name: "配对设备" }));
 
     await user.click(await screen.findByRole("tab", { name: "搜索" }));
-    await screen.findByPlaceholderText("输入片名、年份或豆瓣链接");
+    await screen.findByPlaceholderText("输入电影或剧集名称");
     expect(client.pair).toHaveBeenCalledWith({ code: "123456" });
   });
 
@@ -243,32 +256,23 @@ describe("片源助手客户端", () => {
     expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith("movie", discoveryItem.id, "csrf-test", 10);
   });
 
-  it("renders a user query, deterministic assistant message, and release row", async () => {
+  it("renders a user query and works only, leaving releases to the selected work", async () => {
     const client = makeClient();
     render(<App client={client} />);
 
     await searchOnce(client);
 
-    expect(screen.getByText("星际穿越")).not.toBeNull();
-    expect(screen.getByText("找到 1 个匹配，已按做种数和体积排序。")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "选择" })).not.toBeNull();
-    expect(client.search).toHaveBeenCalledWith({ query: "星际穿越", limit: 20 }, "csrf-test");
+    expect(screen.getByRole("button", { name: "星际穿越，2014，电影" })).not.toBeNull();
+    expect(screen.getByText("找到 1 部作品，选择作品查看详情和片源。")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "星际穿越，2014，电影" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "选择" })).not.toBeInTheDocument();
+    expect(client.searchDiscoveryMedia).toHaveBeenCalledWith("星际穿越", "csrf-test", 10);
+    expect(client.search).not.toHaveBeenCalled();
   });
 
   it("opens title suggestions in the same media inspector as discovery entries", async () => {
     const client = makeClient();
-    const media = {
-      id: "1293000",
-      title: "星际穿越",
-      posterUrl: "/api/discovery/media/movie/1293000/poster",
-      originalTitle: "Interstellar",
-      year: "2014",
-      rating: 8.6,
-      mediaType: "movie" as const,
-      genres: ["科幻"],
-      summary: "一支探险队穿越虫洞寻找新家园。",
-      sourceUrl: "https://movie.douban.com/subject/1293000/"
-    };
+    const media = searchMediaItem;
     vi.mocked(client.searchDiscoveryMedia).mockResolvedValue({ query: "星际穿越", total: 1, items: [media] });
     vi.mocked(client.getDiscoveryMediaDetails).mockResolvedValue({
       itemId: media.id,
@@ -284,16 +288,50 @@ describe("片源助手客户端", () => {
       releases: [release]
     });
     render(<App client={client} />);
-    await searchOnce(client);
+    const user = await searchOnce(client);
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: "星际穿越，2014，电影" }));
+    await user.click(await screen.findByRole("button", { name: "星际穿越，2014，电影" }));
 
     expect(await screen.findByRole("heading", { name: "星际穿越", level: 2 })).toBeInTheDocument();
-    expect(await screen.findAllByText(release.title)).not.toHaveLength(0);
+    expect(await screen.findByText(release.title)).toBeInTheDocument();
     await waitFor(() => {
       expect(client.getDiscoveryMediaDetails).toHaveBeenCalledWith("movie", media.id, "csrf-test");
       expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith("movie", media.id, "csrf-test", 10);
     });
+  });
+
+  it("keeps actor details in the current search inspector and clears them only when changing mode", async () => {
+    const client = makeClient();
+    vi.mocked(client.getDiscoveryMediaDetails).mockResolvedValue({
+      itemId: searchMediaItem.id,
+      actors: [{ name: "演员甲" }],
+      directors: ["导演甲"]
+    });
+    vi.mocked(client.getDiscoveryActor).mockResolvedValue({
+      id: "actor-1",
+      name: "演员甲",
+      latinName: "Actor A",
+      intro: "演员 / 导演",
+      works: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      hasNext: false
+    });
+    render(<App client={client} />);
+    const user = await searchOnce(client);
+
+    await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
+    await user.click(await screen.findByRole("button", { name: "演员甲" }));
+
+    expect(await screen.findByRole("heading", { name: "演员甲" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "影视作品" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "搜索" })).toHaveAttribute("aria-selected", "true");
+    expect(client.getDiscoveryActor).toHaveBeenCalledWith("演员甲", "csrf-test", 1, 10);
+
+    await user.click(screen.getByRole("tab", { name: "发现" }));
+    expect(await screen.findByRole("tab", { name: "热门电影" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "演员甲" })).not.toBeInTheDocument();
   });
 
   it("previews on selection and only sends confirm:true after explicit grab", async () => {
@@ -301,7 +339,9 @@ describe("片源助手客户端", () => {
     render(<App client={client} />);
     const user = await searchOnce(client);
 
-    await user.click(screen.getByRole("button", { name: "选择" }));
+    await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
+    await screen.findByText(release.title);
+    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
     await screen.findByText("已选择 · 01");
     expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
     expect(client.grab).not.toHaveBeenCalled();
@@ -318,7 +358,9 @@ describe("片源助手客户端", () => {
     render(<App client={client} />);
     const user = await searchOnce(client);
 
-    await user.click(screen.getByRole("button", { name: "选择" }));
+    await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
+    await screen.findByText(release.title);
+    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
     await screen.findByText("已选择 · 01");
     await user.click(screen.getByRole("button", { name: "加入下载" }));
 
@@ -339,7 +381,9 @@ describe("片源助手客户端", () => {
     render(<App client={client} />);
     const user = await searchOnce(client);
 
-    await user.click(screen.getByRole("button", { name: "选择" }));
+    await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
+    await screen.findByText(release.title);
+    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
     expect(await screen.findByText("已有相同任务")).not.toBeNull();
     expect(screen.getByRole("button", { name: "加入下载" })).toBeDisabled();
     expect(client.grab).not.toHaveBeenCalled();

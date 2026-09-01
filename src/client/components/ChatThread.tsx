@@ -11,7 +11,7 @@ export function ChatThread({ messages }: { messages: ChatMessage[] }) {
   return (
     <section className="chat-thread" aria-label="对话记录">
       {messages.length === 0 ? (
-        <EmptyState title="准备好了" detail="输入片名、年份或豆瓣链接，开始查找片源。" />
+        <EmptyState title="准备好了" detail="输入电影或剧集名称，选择作品后查看详情和片源。" />
       ) : (
         <ol className="message-list">
           {messages.map((message) => {

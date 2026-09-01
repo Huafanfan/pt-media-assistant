@@ -29,7 +29,7 @@ export function QueryComposer({
         <Paperclip size={24} strokeWidth={1.6} />
       </span>
       <label className="sr-only" htmlFor="query-input">
-        搜索片源
+        搜索作品
       </label>
       <textarea
         id="query-input"
@@ -37,9 +37,9 @@ export function QueryComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="输入片名、年份或豆瓣链接"
+        placeholder="输入电影或剧集名称"
         disabled={disabled || loading}
-        aria-label="输入片名、年份或豆瓣链接"
+        aria-label="输入电影或剧集名称"
       />
       <button
         className="send-button"

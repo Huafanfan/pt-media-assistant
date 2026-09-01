@@ -10,7 +10,7 @@ export function LoadingState({ label = "正在连接服务…" }: { label?: stri
 }
 export function EmptyState({
   title = "还没有搜索结果",
-  detail = "输入片名、年份或豆瓣链接，开始查找片源。"
+  detail = "输入电影或剧集名称，选择作品后查看详情和片源。"
 }: {
   title?: string;
   detail?: string;

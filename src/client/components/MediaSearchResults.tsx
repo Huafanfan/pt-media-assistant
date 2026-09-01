@@ -7,12 +7,13 @@ export type MediaSearchResultsProps = {
   items: DiscoveryMedia[];
   loading: boolean;
   error: string | null;
+  searched: boolean;
   selectedItemId: string | null;
   onSelect: (item: DiscoveryMedia) => void;
 };
 
-export function MediaSearchResults({ items, loading, error, selectedItemId, onSelect }: MediaSearchResultsProps) {
-  if (!loading && !error && items.length === 0) return null;
+export function MediaSearchResults({ items, loading, error, searched, selectedItemId, onSelect }: MediaSearchResultsProps) {
+  if (!searched && !loading && !error && items.length === 0) return null;
 
   return (
     <section className="media-search-results" aria-label="作品搜索结果">
@@ -29,7 +30,12 @@ export function MediaSearchResults({ items, loading, error, selectedItemId, onSe
           <span>正在匹配电影和剧集…</span>
         </div>
       ) : error ? (
-        <p className="media-search-results-error" role="status">作品匹配暂时不可用</p>
+        <p className="media-search-results-error" role="status">{error}</p>
+      ) : items.length === 0 ? (
+        <div className="media-search-results-empty" role="status">
+          <strong>没有找到匹配作品</strong>
+          <p>换个片名或年份再试试。</p>
+        </div>
       ) : (
         <div className="media-search-results-list">
           {items.map((item) => {

@@ -1,5 +1,6 @@
 .discovery-browser,
-.discovery-inspector {
+.discovery-inspector,
+.actor-view {
   --discovery-black: #080a0b;
   --discovery-surface: #101214;
   --discovery-selected: #17120f;
@@ -24,29 +25,36 @@
 .discovery-browser *::after,
 .discovery-inspector *,
 .discovery-inspector *::before,
-.discovery-inspector *::after {
+.discovery-inspector *::after,
+.actor-view *,
+.actor-view *::before,
+.actor-view *::after {
   box-sizing: border-box;
 }
 
 .discovery-browser button,
-.discovery-inspector button {
+.discovery-inspector button,
+.actor-view button {
   color: inherit;
   font: inherit;
 }
 
 .discovery-browser button,
-.discovery-inspector button {
+.discovery-inspector button,
+.actor-view button {
   cursor: pointer;
 }
 
 .discovery-browser button:disabled,
-.discovery-inspector button:disabled {
+.discovery-inspector button:disabled,
+.actor-view button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
 .discovery-browser button:focus-visible,
-.discovery-inspector button:focus-visible {
+.discovery-inspector button:focus-visible,
+.actor-view button:focus-visible {
   outline: 2px solid var(--discovery-copper);
   outline-offset: 3px;
 }
@@ -1054,7 +1062,54 @@
   margin-top: 28px;
 }
 
-/* Media suggestions in direct search */
+/* Actor profile shown in the same right-side inspector as a work */
+
+.discovery-inspector-stack > .actor-view {
+  min-height: 0;
+  flex: 1 1 auto;
+  border-left: 1px solid var(--discovery-divider);
+}
+
+.discovery-inspector-stack > .actor-view .actor-view-header {
+  min-height: 74px;
+  padding: 14px 18px;
+}
+
+.discovery-inspector-stack > .actor-view .actor-view-scroll {
+  padding: 22px 18px 30px;
+}
+
+.discovery-inspector-stack > .actor-view .actor-profile-card {
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 14px;
+  padding-bottom: 22px;
+}
+
+.discovery-inspector-stack > .actor-view .actor-profile-avatar {
+  width: 78px;
+  height: 114px;
+}
+
+.discovery-inspector-stack > .actor-view .actor-profile-copy h2 {
+  font-size: 1.55rem;
+}
+
+.discovery-inspector-stack > .actor-view .actor-profile-intro {
+  margin-top: 15px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.discovery-inspector-stack > .actor-view .actor-works-section {
+  padding-top: 22px;
+}
+
+.discovery-inspector-stack > .actor-view .actor-work-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 12px;
+}
+
+/* Title search only returns media; releases live in MediaInspector */
 
 .media-search-results {
   padding: 18px 18px 20px;
@@ -1162,6 +1217,25 @@
   gap: 7px;
   color: var(--muted);
   font-size: 0.76rem;
+}
+
+.media-search-results-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 2px 4px;
+  color: var(--muted);
+}
+
+.media-search-results-empty strong {
+  color: var(--ivory);
+  font-size: 0.86rem;
+  font-weight: 620;
+}
+
+.media-search-results-empty p {
+  margin: 0;
+  font-size: 0.74rem;
 }
 
 .media-search-results-error {
@@ -1442,6 +1516,29 @@
   .media-search-results-list {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .discovery-inspector-stack > .actor-view {
+    position: fixed;
+    z-index: 30;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: min(78dvh, 720px);
+    border: 1px solid var(--discovery-divider);
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -14px 36px rgba(0, 0, 0, 0.36);
+  }
+
+  .discovery-inspector-stack > .actor-view .actor-view-header {
+    min-height: 62px;
+    padding: 10px 14px;
+  }
+
+  .discovery-inspector-stack > .actor-view .actor-view-scroll {
+    padding: 18px 14px 30px;
+  }
 }
 
 @media (max-width: 420px) {
@@ -1519,7 +1616,10 @@
   .discovery-browser *::after,
   .discovery-inspector *,
   .discovery-inspector *::before,
-  .discovery-inspector *::after {
+  .discovery-inspector *::after,
+  .actor-view *,
+  .actor-view *::before,
+  .actor-view *::after {
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

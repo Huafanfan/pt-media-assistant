@@ -18,9 +18,8 @@ import { MediaSearchResults } from "./components/MediaSearchResults";
 import { ModeSwitch, type AppMode } from "./components/ModeSwitch";
 import { PairingGate } from "./components/PairingGate";
 import { QueryComposer } from "./components/QueryComposer";
-import { ReleaseList } from "./components/ReleaseList";
 import { RuntimeStatusBar } from "./components/RuntimeSummary";
-import { ErrorMessage, LoadingState, OfflineState } from "./components/States";
+import { LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
 import { useDiscovery } from "./hooks/useDiscovery";
@@ -44,7 +43,7 @@ function messageId(): string {
 }
 
 function initialAssistantMessage(total: number): string {
-  return `找到 ${total} 个匹配，已按做种数和体积排序。`;
+  return `找到 ${total} 部作品，选择作品查看详情和片源。`;
 }
 
 type MediaOrigin =
@@ -72,12 +71,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [searchState, setSearchState] = useState<SearchState>("idle");
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [mediaSearchItems, setMediaSearchItems] = useState<DiscoveryMedia[]>([]);
   const [mediaSearchLoading, setMediaSearchLoading] = useState(false);
   const [mediaSearchError, setMediaSearchError] = useState<string | null>(null);
-  const [releases, setReleases] = useState<ReleaseSummary[]>([]);
-  const [resultTotal, setResultTotal] = useState(0);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -92,7 +88,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [actorHistory, setActorHistory] = useState<ActorNavigationEntry[]>([]);
   const [discoveryInspectorError, setDiscoveryInspectorError] = useState<string | null>(null);
   const [discoveryDetailsError, setDiscoveryDetailsError] = useState<string | null>(null);
-  const actor = useDiscoveryActor(client, csrfToken, selectedActorName, paired && mode === "discover");
+  const actor = useDiscoveryActor(client, csrfToken, selectedActorName, paired && Boolean(selectedActorName));
   const standaloneMedia = useMediaInspector(
     client,
     csrfToken,
@@ -109,7 +105,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const refreshAllStatus = () => {
     void Promise.allSettled([bootstrap.refreshHealth(), runtime.refresh()]);
   };
-  const hasInspector = Boolean(selection || selectedMediaItem);
+  const hasInspector = Boolean(selection || selectedMediaItem || selectedActorName);
 
   const sessionFailure = !bootstrap.loading && !session && bootstrap.sessionError;
   const pairingView = !bootstrap.loading && !sessionFailure && !paired;
@@ -147,46 +143,35 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
       return;
     }
     if (!csrfToken) {
-      setSearchError("会话已失效，请重新配对设备。");
+      setMediaSearchError("会话已失效，请重新配对设备。");
       setSearchState("error");
       return;
     }
 
     setSearchState("loading");
-    setSearchError(null);
     setMediaSearchItems([]);
     setMediaSearchError(null);
     setMediaSearchLoading(true);
-    setReleases([]);
-    setResultTotal(0);
     setSelection(null);
     setSelectionError(null);
     setInspectorExpanded(false);
     setGrabResult(null);
     setSelectedMediaItem(null);
     setMediaOrigin(null);
+    setSelectedActorName(null);
+    setActorHistory([]);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
     setMessages((current) => [
       ...current,
       { id: messageId(), role: "user", text: nextQuery, createdAt: Date.now() }
     ]);
 
     try {
-      const [releaseResult, mediaResult] = await Promise.allSettled([
-        client.search({ query: nextQuery, limit: 20 }, csrfToken),
-        client.searchDiscoveryMedia(nextQuery, csrfToken, 10)
-      ]);
-      if (mediaResult.status === "fulfilled") {
-        setMediaSearchItems(mediaResult.value.items);
-        setMediaSearchError(null);
-      } else {
-        setMediaSearchItems([]);
-        setMediaSearchError("作品匹配暂时不可用");
-      }
+      const response = await client.searchDiscoveryMedia(nextQuery, csrfToken, 10);
+      setMediaSearchItems(response.items);
+      setMediaSearchError(null);
       setMediaSearchLoading(false);
-      if (releaseResult.status === "rejected") throw releaseResult.reason;
-      const response = releaseResult.value;
-      setReleases(response.releases);
-      setResultTotal(response.total);
       setMessages((current) => [
         ...current,
         { id: messageId(), role: "assistant", text: initialAssistantMessage(response.total), createdAt: Date.now() }
@@ -196,7 +181,8 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     } catch (error) {
       setMediaSearchLoading(false);
       const message = readableError(error);
-      setSearchError(message);
+      setMediaSearchItems([]);
+      setMediaSearchError(message);
       setSearchState("error");
       setMessages((current) => [
         ...current,
@@ -224,16 +210,6 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     }
   };
 
-  const handleCancel = () => {
-    if (confirmLoading) {
-      return;
-    }
-    setSelection(null);
-    setInspectorExpanded(false);
-    setSelectionError(null);
-    setGrabResult(null);
-  };
-
   const resetReleaseSelection = () => {
     if (confirmLoading) return;
     setSelection(null);
@@ -251,12 +227,10 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     setGrabResult(null);
     setSelectedMediaItem(null);
     setMediaOrigin(null);
-    if (nextMode === "search") {
-      setSelectedActorName(null);
-      setActorHistory([]);
-      setDiscoveryInspectorError(null);
-      setDiscoveryDetailsError(null);
-    }
+    setSelectedActorName(null);
+    setActorHistory([]);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
   };
 
   const handleCollectionChange = (collection: DiscoveryCollectionId) => {
@@ -439,6 +413,43 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     </div>
   ) : null;
 
+  const actorInspector = selectedActorName ? (
+    <div className="discovery-inspector-stack">
+      <ActorView
+        profile={actor.profile}
+        page={actor.page}
+        loading={actor.loading}
+        error={actor.error}
+        onBack={handleActorBack}
+        onSelectWork={handleActorWork}
+        onPageChange={actor.setPage}
+        onRetry={actor.retry}
+      />
+    </div>
+  ) : null;
+
+  const selectionPanel = selection ? (
+    <SelectionPanel
+      selection={selection}
+      previewError={selectionError}
+      expanded={inspectorExpanded}
+      confirmLoading={confirmLoading}
+      grabResult={grabResult}
+      storage={runtime.storage}
+      storageLoading={runtime.storageLoading}
+      storageError={runtime.storageError}
+      torrents={runtime.torrents}
+      torrentsLoading={runtime.torrentsLoading}
+      torrentsError={runtime.torrentsError}
+      onToggle={() => setInspectorExpanded((current) => !current)}
+      onCancel={resetReleaseSelection}
+      onConfirm={handleConfirm}
+      onRefreshRuntime={() => void runtime.refresh()}
+    />
+  ) : null;
+
+  const activeInspector = selectionPanel ?? mediaInspector ?? actorInspector;
+
   if (bootstrap.loading) {
     return (
       <div className="app-shell">
@@ -499,61 +510,30 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                 <ModeSwitch mode={mode} onChange={handleModeChange} />
               </div>
               {healthError ? <p className="workspace-warning" role="status">{healthError}</p> : null}
-              {selectedActorName ? (
-                <ActorView
-                  profile={actor.profile}
-                  page={actor.page}
-                  loading={actor.loading}
-                  error={actor.error}
-                  onBack={handleActorBack}
-                  onSelectWork={handleActorWork}
-                  onPageChange={actor.setPage}
-                  onRetry={actor.retry}
-                />
-              ) : (
-                <DiscoveryBrowser
-                  collection={discovery.collection}
-                  page={discovery.page}
-                  pageSize={discovery.pageSize}
-                  items={discovery.items}
-                  total={discovery.total}
-                  hasNext={discovery.hasNext}
-                  loading={discovery.loading}
-                  error={discovery.error}
-                  selectedItemId={selectedMediaItem?.id ?? null}
-                  availabilityById={discovery.availabilityById}
-                  checkingIds={discovery.checkingIds}
-                  onCollectionChange={handleCollectionChange}
-                  onPageChange={handleDiscoveryPageChange}
-                  onSelectItem={handleDiscoveryItem}
-                  onRetry={discovery.retryCollection}
-                />
-              )}
+              <DiscoveryBrowser
+                collection={discovery.collection}
+                page={discovery.page}
+                pageSize={discovery.pageSize}
+                items={discovery.items}
+                total={discovery.total}
+                hasNext={discovery.hasNext}
+                loading={discovery.loading}
+                error={discovery.error}
+                selectedItemId={selectedMediaItem?.id ?? null}
+                availabilityById={discovery.availabilityById}
+                checkingIds={discovery.checkingIds}
+                onCollectionChange={handleCollectionChange}
+                onPageChange={handleDiscoveryPageChange}
+                onSelectItem={handleDiscoveryItem}
+                onRetry={discovery.retryCollection}
+              />
             </section>
 
-            {selection ? (
-              <SelectionPanel
-                selection={selection}
-                previewError={selectionError}
-                expanded={inspectorExpanded}
-                confirmLoading={confirmLoading}
-                grabResult={grabResult}
-                storage={runtime.storage}
-                storageLoading={runtime.storageLoading}
-                storageError={runtime.storageError}
-                torrents={runtime.torrents}
-                torrentsLoading={runtime.torrentsLoading}
-                torrentsError={runtime.torrentsError}
-                onToggle={() => setInspectorExpanded((current) => !current)}
-                onCancel={resetReleaseSelection}
-                onConfirm={handleConfirm}
-                onRefreshRuntime={() => void runtime.refresh()}
-              />
-            ) : mediaInspector}
+            {activeInspector}
           </>
         ) : (
           <>
-            <section className="chat-pane" aria-label="片源查询对话">
+            <section className="chat-pane" aria-label="作品搜索对话">
               <div className="search-mode-toolbar">
                 <ModeSwitch mode={mode} onChange={handleModeChange} />
               </div>
@@ -561,48 +541,20 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
               {healthError ? <p className="workspace-warning" role="status">{healthError}</p> : null}
             </section>
 
-            <aside className="results-pane" aria-label="片源搜索结果">
+            <aside className="results-pane" aria-label="作品搜索结果">
               <div className="results-scroll">
-                {searchState === "loading" ? <LoadingState label="正在查找片源…" /> : null}
-                {searchState === "error" && searchError ? <ErrorMessage message={searchError} /> : null}
                 <MediaSearchResults
                   items={mediaSearchItems}
                   loading={mediaSearchLoading}
                   error={mediaSearchError}
+                  searched={searchState !== "idle"}
                   selectedItemId={mediaOrigin?.kind === "search" ? selectedMediaItem?.id ?? null : null}
                   onSelect={(item) => handleMediaItem(item, { kind: "search", query: item.title })}
                 />
-                {searchState !== "loading" ? (
-                  <ReleaseList
-                    releases={releases}
-                    total={resultTotal}
-                    selectedId={selection?.release.id ?? null}
-                    selectingId={selectingId}
-                    onSelect={handleSelect}
-                  />
-                ) : null}
               </div>
             </aside>
 
-            {selection ? (
-              <SelectionPanel
-                selection={selection}
-                previewError={selectionError}
-                expanded={inspectorExpanded}
-                confirmLoading={confirmLoading}
-                grabResult={grabResult}
-                storage={runtime.storage}
-                storageLoading={runtime.storageLoading}
-                storageError={runtime.storageError}
-                torrents={runtime.torrents}
-                torrentsLoading={runtime.torrentsLoading}
-                torrentsError={runtime.torrentsError}
-                onToggle={() => setInspectorExpanded((current) => !current)}
-                onCancel={handleCancel}
-                onConfirm={handleConfirm}
-                onRefreshRuntime={() => void runtime.refresh()}
-              />
-            ) : mediaInspector}
+            {activeInspector}
 
             <div className="composer-dock">
               <QueryComposer

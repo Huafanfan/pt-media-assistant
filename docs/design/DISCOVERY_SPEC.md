@@ -17,14 +17,14 @@ These PNG concepts are local visual references only. They are intentionally igno
 - Discovery collections: `热门电影`, `口碑电影`, `热门剧集`, `口碑剧集`, `Top 250`.
 - Discovery row fields: rank, poster thumbnail, Chinese title, optional original title, year, rating, genres, one-line summary, PT availability.
 - Discovery pages default to 10 items. The response includes page, page size, total count, and whether another page exists; previous/next controls load later pages without leaving discovery mode.
-- Selecting an item loads its bounded subject details on demand: poster, summary, up to 12 clickable actor names, and director names. Selecting an actor opens an actor-index view with profile metadata and a paged movie/TV filmography, with a back action returning to the selected work.
+- Selecting an item loads its bounded subject details on demand: poster, summary, up to 12 clickable actor names, and director names. Selecting an actor opens the actor profile in the same right-side inspector, with profile metadata and a paged movie/TV filmography; the current discovery or search surface remains in place and a back action returns to the selected work.
 - Release candidates are fetched as one bounded server snapshot of up to 50 entries. The inspector shows 10 entries per page locally, so candidate pagination does not create another Prowlarr request; its refresh control replaces the server snapshot explicitly.
 - Every movie/TV entry is normalized into the same media entity before rendering. Collection rows, actor filmography entries, and movie/TV search suggestions all open the same media inspector; the entry source changes navigation context only, never the detail layout or release workflow.
-- A movie/TV search suggestion is an optional companion result to the existing direct PT search. Selecting it opens the same media inspector, whose release candidates are queried by canonical media type and subject id. A query with no Douban work match still keeps the direct PT release list and its existing explicit preview flow.
+- Title search is media-first: it returns only movie/TV works. Selecting a work opens the same media inspector used by collections and actor filmographies; its release candidates are queried by canonical media type and subject id. There is one release list, inside the selected-work inspector, so search never renders a second direct PT release list beside it.
 - Availability states: `待检查`, `检查中`, `有资源 N`, `可能匹配 N`, `暂未找到`.
 - Availability results are cached by the backend for up to 24 hours per collection, page, item, and result limit. The inspector refresh control explicitly requests a server-side refresh; it does not rely on browser-only cache invalidation.
 - Collection pages, subject details, and poster bytes are cached by the backend for a short TTL. Poster bytes are served through a same-origin route after the server validates the fixed Douban image host allowlist.
-- Desktop: discovery navigation and list occupy the available page width until a release is selected; the existing inspector then remains the third column. Runtime status stays as a compact second row under the global service-health line.
+- Desktop: discovery navigation and list occupy the available page width until a work or actor is selected; the shared inspector then remains the third column. Runtime status stays as a compact second row under the global service-health line.
 - Mobile: the discovery list is the primary surface; release candidates appear as a bottom sheet. Final download confirmation remains a separate explicit action.
 
 ## Design tokens
@@ -81,9 +81,9 @@ These PNG concepts are local visual references only. They are intentionally igno
 8. Only the existing explicit `加入下载` confirmation may create a qBittorrent task.
 9. The release inspector's refresh control may explicitly refresh the selected item's PT availability result through the protected backend refresh action.
 10. Runtime status is always available as a compact header row; detailed storage and download sections appear only in the relevant selection inspector.
-11. Selecting an actor replaces the discovery list with the actor index and retains the originating item for the back action; changing actor-work pages requests only the actor profile endpoint.
-12. Selecting a work from the actor index opens the reusable media inspector in the same workspace; it never navigates to Douban. The actor index remains available behind the inspector until the user closes it or goes back.
-13. Selecting a movie/TV search suggestion opens the same reusable media inspector. Direct PT release rows remain available for queries that do not resolve to a media entity.
+11. Selecting an actor opens the actor profile in the right-side inspector, keeps the current discovery or search surface visible, and retains the originating item for the back action; changing actor-work pages requests only the actor profile endpoint.
+12. Selecting a work from the actor index opens the reusable media inspector in the same workspace; it never navigates to Douban. Closing the work inspector returns to the actor profile.
+13. Title search returns movie/TV works only. Selecting a search result opens the same reusable media inspector; all PT candidates appear there and nowhere else on the search page.
 
 ## Allowed first-viewport copy
 
