@@ -2,9 +2,11 @@ name: pt-media-assistant
 
 services:
   app:
-    image: pt-media-assistant:local
+    image: pt-media-assistant:server
     build:
-      context: .
+      # On the server, source is staged below /srv/app/pt-media-assistant/source
+      # so deployment secrets stay outside the Docker build context.
+      context: "${PT_MEDIA_BUILD_CONTEXT:-.}"
       dockerfile: Dockerfile
     container_name: pt-media-assistant
     restart: unless-stopped
@@ -12,35 +14,25 @@ services:
     network_mode: host
     environment:
       NODE_ENV: production
-      PT_MEDIA_HOST: 0.0.0.0
-      PT_MEDIA_PORT: "4178"
-      PT_MEDIA_TRUST_LAN: "1"
+      PT_MEDIA_HOST: "${PT_MEDIA_HOST:-192.168.1.2}"
+      PT_MEDIA_PORT: "${PT_MEDIA_PORT:-4178}"
+      PT_MEDIA_TRUST_LAN: "${PT_MEDIA_TRUST_LAN:-1}"
       PT_MEDIA_ALLOW_GRAB: "${PT_MEDIA_ALLOW_GRAB:-0}"
-      PT_MEDIA_ORIGIN: "${PT_MEDIA_ORIGIN:-}"
-      PROWLARR_URL: "${PROWLARR_URL:-http://localhost:9696}"
+      PT_MEDIA_ORIGIN: "${PT_MEDIA_ORIGIN:-http://192.168.1.2:4178}"
+      PROWLARR_URL: http://127.0.0.1:9696
       PROWLARR_API_KEY_FILE: /run/secrets/prowlarr_api_key
-      PROWLARR_PROXY_TOKEN_FILE: /run/secrets/prowlarr_proxy_token
-      QBITTORRENT_URL: http://localhost:8080
-      PT_MEDIA_NAS_PATH: "${PT_MEDIA_NAS_PATH:?Set PT_MEDIA_NAS_PATH in .env.orbstack}"
+      QBITTORRENT_URL: "${QBITTORRENT_URL:-http://localhost:8080}"
+      PT_MEDIA_NAS_PATH: "${PT_MEDIA_NAS_PATH:-/mnt/nas/pt}"
       PT_MEDIA_NAS_CHECK_MODE: sentinel
-      PT_MEDIA_NAS_SENTINEL: .pt-media-assistant-mounted
+      PT_MEDIA_NAS_SENTINEL: "${PT_MEDIA_NAS_SENTINEL:-.pt-media-assistant-mounted}"
       PT_MEDIA_NAS_SENTINEL_PATH: /run/pt-media-nas-sentinel
-      PT_MEDIA_NAS_STATUS_PATH: /run/pt-media-nas-status
     secrets:
       - source: prowlarr_api_key
         target: prowlarr_api_key
-      - source: prowlarr_proxy_token
-        target: prowlarr_proxy_token
     volumes:
       - type: bind
-        source: "${PT_MEDIA_NAS_PATH:?Set PT_MEDIA_NAS_PATH in .env.orbstack}/.pt-media-assistant-mounted"
+        source: "${PT_MEDIA_NAS_PATH:-/mnt/nas/pt}/${PT_MEDIA_NAS_SENTINEL:-.pt-media-assistant-mounted}"
         target: /run/pt-media-nas-sentinel
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.data/orbstack/nas-status.json
-        target: /run/pt-media-nas-status
         read_only: true
         bind:
           create_host_path: false
@@ -59,9 +51,34 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    # The server binds the app to its LAN address rather than loopback, so the
+    # image's generic 127.0.0.1 healthcheck must follow the configured listener.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://' + process.env.PT_MEDIA_HOST + ':' + process.env.PT_MEDIA_PORT + '/api/live').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  prowlarr:
+    # The migrated config.xml must contain <BindAddress>127.0.0.1</BindAddress>.
+    image: "${PROWLARR_IMAGE:-lscr.io/linuxserver/prowlarr:version-2.5.2.5491}"
+    container_name: pt-media-assistant-prowlarr
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PUID: "${PROWLARR_PUID:-1000}"
+      PGID: "${PROWLARR_PGID:-1000}"
+      TZ: "${PROWLARR_TZ:-Asia/Shanghai}"
+    volumes:
+      - type: bind
+        source: "${PROWLARR_DATA_DIR:-/srv/data/pt-media-assistant/prowlarr}"
+        target: /config
 
 secrets:
   prowlarr_api_key:
-    file: ./.data/orbstack/prowlarr_api_key
-  prowlarr_proxy_token:
-    file: ./.data/orbstack/prowlarr_proxy_token
+    file: "${PROWLARR_API_KEY_FILE:-/srv/app/pt-media-assistant/secrets/prowlarr_api_key}"

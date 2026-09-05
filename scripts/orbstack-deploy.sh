@@ -139,5 +139,5 @@ launchctl bootout "gui/$(id -u)/$LAUNCH_AGENT_LABEL" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_FILE"
 launchctl kickstart -k "gui/$(id -u)/$LAUNCH_AGENT_LABEL"
 
-docker compose --env-file "$ENV_FILE" -f "$PROJECT_ROOT/compose.yaml" up -d --build --remove-orphans
-docker compose --env-file "$ENV_FILE" -f "$PROJECT_ROOT/compose.yaml" ps
+docker compose --env-file "$ENV_FILE" -f "$PROJECT_ROOT/compose.orbstack.yaml" up -d --build --remove-orphans
+docker compose --env-file "$ENV_FILE" -f "$PROJECT_ROOT/compose.orbstack.yaml" ps

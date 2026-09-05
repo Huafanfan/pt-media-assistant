@@ -9,19 +9,19 @@ Provide a local, mobile-friendly discovery and search interface for browsing fix
 ```text
 iPhone browser
   -> private-LAN auto session + CSRF check
-  -> local Fastify service (0.0.0.0:4178)
+  -> server Fastify service (192.168.1.2:4178)
      -> fixed public Douban subject collections
-  -> Prowlarr API (127.0.0.1:9696)
+  -> Prowlarr API (server loopback 127.0.0.1:9696)
   -> TJUPT
-  -> qBittorrent API (localhost:8080)
-  -> active SMB mount configured by PT_MEDIA_NAS_PATH
+  -> existing native qBittorrent API (localhost:8080)
+  -> active server NAS path represented by a sentinel file
 ```
 
 - TJUPT Cookie stays inside Prowlarr. The app never reads it.
-- The Prowlarr API key is discovered locally from Prowlarr `config.xml` or supplied by environment; it is never sent to the browser or logged.
+- The Prowlarr API key is read at runtime from a mode-0600 server secret file (or local config in native macOS mode); it is never sent to the browser or logged.
 - Prowlarr release download URLs and GUIDs stay in a short-lived server-side cache. The browser receives an opaque random release ID.
 - Auto sessions are issued only to actual loopback, RFC1918, or link-local socket peers; proxy headers are not trusted.
-- Grab requests require a session, exact-origin/CSRF checks, a fresh NAS mount check, an opaque release ID, and `confirm: true`.
+- Grab requests require a session, exact-origin/CSRF checks, a fresh NAS sentinel check, an opaque release ID, and `confirm: true`.
 - qBittorrent responses are reduced to safe status fields. Tracker URLs and passkeys are never returned.
 - Douban collection ids are closed server-side mappings. The browser cannot provide an upstream URL. Poster sources are restricted to `img*.doubanio.com` HTTPS URLs, then served through an authenticated same-origin proxy; raw image URLs are never returned.
 - Actor and director details are fetched only for a selected item, reduced to bounded names, and cached in the server process. Actor profile and work requests use Douban's public actor/filmography endpoints and keep image sources server-side.
@@ -31,28 +31,47 @@ iPhone browser
 
 | Variable | Default |
 | --- | --- |
-| `PT_MEDIA_HOST` | `0.0.0.0` |
+| `PT_MEDIA_HOST` | `192.168.1.2` in server Compose; `0.0.0.0` for the native app default |
 | `PT_MEDIA_PORT` | `4178` |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` |
-| `PROWLARR_API_KEY` | local discovery from Prowlarr config |
-| `PROWLARR_API_KEY_FILE` | optional absolute path to a mounted container secret |
+| `PROWLARR_API_KEY` | local discovery from Prowlarr config (native mode only) |
+| `PROWLARR_API_KEY_FILE` | `/srv/app/pt-media-assistant/secrets/prowlarr_api_key` in server Compose |
 | `PROWLARR_PROXY_TOKEN_FILE` | optional absolute path to the bridge proxy token secret |
 | `QBITTORRENT_URL` | `http://localhost:8080` |
-| `PT_MEDIA_NAS_PATH` | `/Volumes/YourNAS/pt` |
-| `PT_MEDIA_NAS_CHECK_MODE` | `smbfs`; OrbStack Compose uses `sentinel` |
+| `PROWLARR_IMAGE` | `lscr.io/linuxserver/prowlarr:version-2.5.2.5491` |
+| `PROWLARR_DATA_DIR` | `/srv/data/pt-media-assistant/prowlarr` |
+| `PROWLARR_PUID` / `PROWLARR_PGID` / `PROWLARR_TZ` | `1000` / `1000` / `Asia/Shanghai` |
+| `PT_MEDIA_BUILD_CONTEXT` | `./source` on the server; `.` for repo-local builds |
+| `PT_MEDIA_NAS_PATH` | `/mnt/nas/pt` on the server; `/Volumes/YourNAS/pt` on macOS |
+| `PT_MEDIA_NAS_CHECK_MODE` | `sentinel` in server/OrbStack Compose; `smbfs` in native macOS mode |
 | `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` |
-| `PT_MEDIA_NAS_SENTINEL_PATH` | optional single-file mount path inside a container |
-| `PT_MEDIA_NAS_STATUS_PATH` | optional host-generated capacity snapshot inside a container |
+| `PT_MEDIA_NAS_SENTINEL_PATH` | `/run/pt-media-nas-sentinel` in containers |
+| `PT_MEDIA_NAS_STATUS_PATH` | unset on Linux; optional host-generated snapshot in OrbStack |
 | `PT_MEDIA_TRUST_LAN` | `true`; private/LAN peers receive an automatic session |
 | `PT_MEDIA_PAIRING_CODE` | optional fallback when trusted-LAN mode is disabled |
 | `PT_MEDIA_ALLOW_GRAB` | `false`; must be explicitly set to `1` to permit grabs |
 
-## OrbStack deployment boundary
+## Server Docker deployment boundary
 
-- `compose.yaml` uses OrbStack host networking for qBittorrent. Native Prowlarr is reached through a launchd proxy bound only to `bridge100`; the proxy requires a second random token, strips it before forwarding, and allowlists only status/search/grab routes.
+- The production `compose.yaml` runs `app` and a migrated LinuxServer Prowlarr container with `network_mode: host`. The app binds only to `PT_MEDIA_HOST`/`PT_MEDIA_PORT` (default `192.168.1.2:4178`) and has no Compose `ports` mapping. Prowlarr must have `<BindAddress>127.0.0.1</BindAddress>` in its migrated `config.xml`, so host port `9696` remains loopback-only.
+- The server's qBittorrent is the existing native `qbittorrent-nox 4.6.7` on `localhost:8080`; Compose does not create or manage it. A qBittorrent `WebUI\LocalHostAuth=false` change and qBittorrent restart require explicit operator approval. LAN WebUI authentication remains enabled after that localhost-only bypass.
+- Server deployment metadata lives under `/srv/app/pt-media-assistant`; source is staged under `source/`, the API key file is `/srv/app/pt-media-assistant/secrets/prowlarr_api_key` (mode 0600), and Prowlarr data is `/srv/data/pt-media-assistant/prowlarr`. The deploy-time `.env.server` is untracked and mode 0600.
+- The app uses sentinel mode with logical NAS path `/mnt/nas/pt`. Only `/mnt/nas/pt/.pt-media-assistant-mounted` is bind-mounted read-only at `/run/pt-media-nas-sentinel`; the NAS directory itself and any Linux status snapshot are not mounted.
+- The Prowlarr image is pinned by default to `lscr.io/linuxserver/prowlarr:version-2.5.2.5491` to match the migrated data. Image upgrades are explicit compatibility changes, not an implicit startup action.
+- Both services use `restart: unless-stopped`; the app retains read-only root, non-root execution, dropped capabilities, `no-new-privileges`, resource limits, and log rotation. `/api/live` remains the dependency-free Docker health endpoint.
+
+Safe server start sequence:
+
+1. Stage the repository source below `/srv/app/pt-media-assistant/source`, create an untracked mode-0600 `.env.server` from `.env.server.example`, and install the separate mode-0600 Prowlarr API key file. Do not copy a local `.env`, `.data`, or secret directory wholesale.
+2. Migrate Prowlarr data into `/srv/data/pt-media-assistant/prowlarr` and verify `config.xml` has `<BindAddress>127.0.0.1</BindAddress>` before starting the container. Verify the native qBittorrent service and the NAS sentinel independently; no qBittorrent configuration change or restart is implied by Compose.
+3. From `/srv/app/pt-media-assistant`, run `docker compose --env-file .env.server -f compose.yaml config --quiet`, then `docker compose --env-file .env.server -f compose.yaml up -d --build` and check `/api/live` at `http://192.168.1.2:4178/api/live`.
+
+## OrbStack deployment boundary (legacy development / rollback)
+
+- `compose.orbstack.yaml` uses OrbStack host networking for qBittorrent. Native Prowlarr is reached through a launchd proxy bound only to `bridge100`; the proxy requires a second random token, strips it before forwarding, and allowlists only status/search/grab routes.
 - Only a zero-byte sentinel file from the NAS is bind-mounted read-only. This avoids OrbStack VirtioFS stalls observed when creating a whole-directory bind from the macOS SMB mount; qBittorrent remains the only writer.
 - Native macOS mode proves an active `smbfs` ancestor. In container mode the host proxy checks the real directory and sentinel, runs `statfs` on macOS, and refreshes a path-free status snapshot every 10 seconds. The container rejects snapshots older than 30 seconds.
-- The Prowlarr API key is copied into an ignored, mode-0600 local file and exposed to the container as a Compose secret. It is not embedded in the image or environment inspection output.
+- The Prowlarr API key is copied into an ignored, mode-0600 local file and exposed to the container as a Compose secret. It is not embedded in the image or environment inspection output. The OrbStack deployment script always selects `compose.orbstack.yaml` and `.env.orbstack`.
 - `restart: unless-stopped` recovers process exits and Docker/OrbStack restarts. The image checks the dependency-free `/api/live` endpoint; dependency failures remain `degraded` rather than causing a restart loop.
 
 ## API surface

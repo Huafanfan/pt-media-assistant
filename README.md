@@ -59,9 +59,49 @@
 - 演职员信息只返回经过长度和数量限制的姓名列表，且仅在打开条目时按需读取。
 - 下载接口需要有效会话、来源校验、最新 NAS 挂载检查、不透明 release id，以及 `confirm: true`。
 
-## 推荐：OrbStack 常驻部署
+## 推荐：iStoreOS 服务器 Docker 部署
 
-macOS 上推荐使用 OrbStack + Docker Compose。容器使用 `restart: unless-stopped`：应用进程异常退出、Docker 引擎重启或 OrbStack 随登录启动后，服务都会自动恢复。镜像自带健康检查，运行时采用非 root 用户、只读根文件系统、最小权限和有限日志。
+生产运行时推荐使用 iStoreOS 上的 x86_64 Docker 主机（当前地址为 `192.168.1.2`）。服务器版 `compose.yaml` 只启动应用和 Prowlarr；两者都使用 host networking，因此应用可以访问服务器上现有的原生 qBittorrent `http://localhost:8080`。qBittorrent 不是 Compose 服务，也不会被本项目创建、升级或重启。
+
+服务器布局保持部署元数据、源码、密钥和 Prowlarr 数据分离：
+
+```text
+/srv/app/pt-media-assistant/
+  compose.yaml
+  .env.server                 # 本机文件，0600，不提交
+  source/                     # Docker 构建上下文，不含 secrets/
+  secrets/prowlarr_api_key    # API key 文件，0600
+/srv/data/pt-media-assistant/prowlarr/  # Prowlarr /config
+```
+
+应用只通过 `PT_MEDIA_HOST=192.168.1.2` 和 `PT_MEDIA_PORT=4178` 绑定服务器地址；Compose 没有 `ports` 映射。应用采用只读根文件系统、非 root、`cap_drop: ALL`、`no-new-privileges`、进程数/内存上限和日志轮转，且两个容器都使用 `restart: unless-stopped`。Prowlarr 的 API 只通过 `http://127.0.0.1:9696` 供应用访问。
+
+### 服务器启动前的安全前置条件
+
+- 将源码单独放入 `source/`，不要把本机 `.env`、`.data`、`node_modules`、日志或浏览器数据整体复制到服务器构建上下文。
+- 从 `.env.server.example` 创建 `/srv/app/pt-media-assistant/.env.server`，只填写非敏感配置并执行 `chmod 600 .env.server`；该文件保持未跟踪。
+- 确认 `/srv/app/pt-media-assistant/secrets/prowlarr_api_key` 是只包含 API key 的 mode-0600 文件。不要把 key 写进 Compose 环境值、镜像层、聊天或日志。
+- 将已审阅的本机 Prowlarr 数据迁移到 `/srv/data/pt-media-assistant/prowlarr`。启动前必须确认其中的 `config.xml` 将 `<BindAddress>` 设为 `127.0.0.1`（端口保持 `9696`）；host networking 下的通配地址会让 Prowlarr WebUI 暴露到局域网。当前默认镜像固定为 `lscr.io/linuxserver/prowlarr:version-2.5.2.5491`，升级应作为单独的、明确的兼容性变更。
+- 确认服务器已挂载可写的 `/mnt/nas/pt`，并由操作者创建空的 `/mnt/nas/pt/.pt-media-assistant-mounted`。容器只以只读方式绑定这一个哨兵文件，不会绑定 NAS 目录，也不会在 Linux 使用 NAS 状态快照。
+- qBittorrent 目前是服务器上的原生 `qbittorrent-nox 4.6.7`。如果其 localhost 认证阻止应用访问，只有在操作者明确批准后，才可由操作者将 `WebUI\LocalHostAuth=false` 写入 qBittorrent 配置并重启 qBittorrent；本项目不会自动执行这项变更。该设置只放宽 localhost 来源，局域网 WebUI 仍需认证。
+
+### 安全启动序列
+
+在服务器上完成上述迁移和前置检查后：
+
+```bash
+cd /srv/app/pt-media-assistant
+docker compose --env-file .env.server -f compose.yaml config --quiet
+docker compose --env-file .env.server -f compose.yaml up -d --build
+docker compose --env-file .env.server -f compose.yaml ps
+curl -fsS http://192.168.1.2:4178/api/live
+```
+
+先保持 `PT_MEDIA_ALLOW_GRAB=0` 完成搜索、Prowlarr、qB 状态和哨兵检查；只有在明确需要下载时才改为 `1` 并重新部署。`/api/live` 是无上游依赖的容器存活端点；Prowlarr/qB/NAS 的细节通过应用的 `/api/health` 查看。
+
+## 兼容保留：OrbStack 本机开发 / 回滚
+
+macOS 上的旧路径仍然可用，但不再是服务器生产推荐。`compose.orbstack.yaml` 保留原有 OrbStack 配置；`scripts/orbstack-deploy.sh` 会显式选择该文件和现有 `.env.orbstack`，包括 host networking、bridge-only Prowlarr 代理、macOS `smbfs` 检查、单文件 NAS 哨兵以及无路径容量快照。
 
 ```bash
 # 首次部署：替换成自己的已挂载 NAS 目录。
@@ -70,25 +110,15 @@ PT_MEDIA_ALLOW_GRAB=0 \
 ./scripts/orbstack-deploy.sh
 ```
 
-部署脚本会：
-
-- 确认目标目录确实位于活动的 `smbfs` 挂载上；
-- 从本机 Prowlarr 配置读取 API key，只写入被 Git 忽略的 0600 secret 文件；
-- 安装一个只绑定 OrbStack 专用网桥的 launchd 代理；代理还要求独立随机令牌，并只允许状态、搜索和抓取三个 Prowlarr API；
-- 在 NAS 上创建空的 `.pt-media-assistant-mounted` 哨兵文件；
-- 只把 NAS 上的空哨兵文件以只读方式绑定进容器；
-- 每 10 秒在 macOS 侧生成不含路径的 NAS 容量快照，容器拒绝超过 30 秒的旧数据；
-- 构建并后台启动 `pt-media-assistant` 容器。
-
-容器通过 OrbStack host networking 直接访问 qBittorrent 的 `localhost:8080`。Prowlarr 经 bridge-only 代理访问，避免当前 macOS/OrbStack 组合中原生 Prowlarr 的回环转发卡顿。OrbStack 绑定整个 SMB 目录也可能卡住，所以容器只看到一个空哨兵文件和一个无路径容量快照，不读取媒体内容。SMB 断开、代理停止或快照过期时，应用都会把 NAS 标记为不可用并拒绝下载。
+部署脚本会确认 `smbfs` 挂载、读取本机 Prowlarr API key 到被 Git 忽略的 0600 secret 文件、安装只绑定 OrbStack 专用网桥的 launchd 代理、创建 NAS 哨兵和容量快照，然后构建并启动容器。SMB 断开、代理停止或快照过期时，应用会拒绝下载。
 
 常用维护命令：
 
 ```bash
-docker compose --env-file .env.orbstack ps
+docker compose --env-file .env.orbstack -f compose.orbstack.yaml ps
 docker logs --tail 100 pt-media-assistant
-docker compose --env-file .env.orbstack restart
-docker compose --env-file .env.orbstack down
+docker compose --env-file .env.orbstack -f compose.orbstack.yaml restart
+docker compose --env-file .env.orbstack -f compose.orbstack.yaml down
 ```
 
 `.env.orbstack`、`.data/orbstack/`、本机 LaunchAgent 和 NAS 哨兵都只存在本机，不会进入镜像或 Git 历史。若要正式允许下载，把本机 `.env.orbstack` 中的 `PT_MEDIA_ALLOW_GRAB` 改为 `1`，再重新运行部署脚本。
@@ -125,18 +155,23 @@ npm start
 
 | 变量 | 默认值 / 示例 | 作用 |
 | --- | --- | --- |
-| `PT_MEDIA_HOST` | `0.0.0.0` | 监听地址；只建议在可信家庭局域网使用 |
+| `PT_MEDIA_HOST` | `192.168.1.2`（服务器 Compose）；原生默认 `0.0.0.0` | 监听地址；只建议在可信家庭局域网使用 |
 | `PT_MEDIA_PORT` | `4178` | Web 服务端口 |
 | `PROWLARR_URL` | `http://127.0.0.1:9696` | Prowlarr 地址 |
+| `PROWLARR_IMAGE` | `lscr.io/linuxserver/prowlarr:version-2.5.2.5491` | 服务器 Prowlarr 镜像；升级需单独确认 |
+| `PROWLARR_DATA_DIR` | `/srv/data/pt-media-assistant/prowlarr` | 服务器 Prowlarr `/config` 目录 |
+| `PROWLARR_PUID` / `PROWLARR_PGID` | `1000` / `1000` | 服务器 Prowlarr 数据目录的用户/组 |
+| `PROWLARR_TZ` | `Asia/Shanghai` | 服务器 Prowlarr 时区 |
 | `PROWLARR_API_KEY` | 留空 | 可选；留空时从本机配置发现 |
-| `PROWLARR_API_KEY_FILE` | 留空 | 可选；从容器 secret 文件读取 API key |
+| `PROWLARR_API_KEY_FILE` | `/srv/app/pt-media-assistant/secrets/prowlarr_api_key`（服务器） | 从 mode-0600 容器 secret 文件读取 API key |
 | `PROWLARR_PROXY_TOKEN_FILE` | 留空 | 可选；读取 bridge-only 代理的独立令牌 |
 | `QBITTORRENT_URL` | `http://localhost:8080` | qBittorrent Web API 地址 |
-| `PT_MEDIA_NAS_PATH` | `/Volumes/YourNAS/pt` | 下载目标目录 |
-| `PT_MEDIA_NAS_CHECK_MODE` | `smbfs` | 原生模式检查 smbfs；容器使用 `sentinel` |
+| `PT_MEDIA_NAS_PATH` | `/mnt/nas/pt`（服务器）；`/Volumes/YourNAS/pt`（macOS） | 下载目标逻辑路径；服务器 Compose 不绑定目录 |
+| `PT_MEDIA_NAS_CHECK_MODE` | `sentinel`（服务器 Compose）；`smbfs`（原生 macOS） | NAS 安全检查方式 |
 | `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` | 容器 NAS 安全哨兵文件名 |
-| `PT_MEDIA_NAS_SENTINEL_PATH` | 留空 | 容器内单文件绑定路径 |
-| `PT_MEDIA_NAS_STATUS_PATH` | 留空 | 容器内 host-side 容量快照路径 |
+| `PT_MEDIA_NAS_SENTINEL_PATH` | `/run/pt-media-nas-sentinel` | 容器内单文件绑定路径 |
+| `PT_MEDIA_NAS_STATUS_PATH` | 留空（服务器）；`/run/pt-media-nas-status`（OrbStack） | macOS host-side 容量快照路径；Linux 不使用 |
+| `PT_MEDIA_BUILD_CONTEXT` | `./source`（服务器） | Docker 构建上下文；源码与 secrets 分离 |
 | `PT_MEDIA_TRUST_LAN` | `true` | 可信局域网自动建立会话 |
 | `PT_MEDIA_PAIRING_CODE` | 留空 | 关闭可信局域网模式时的六位配对码 |
 | `PT_MEDIA_ALLOW_GRAB` | `false` | 下载总开关；必须显式设为 `1` 才允许抓取 |
@@ -199,8 +234,9 @@ docs/
   design/       设计规格与本地视觉稿
   assets/       README 使用的脱敏 SVG 配图
 Dockerfile      多阶段、非 root 生产镜像
-compose.yaml   OrbStack 常驻服务与自动重启策略
-scripts/       本机安全部署脚本
+compose.yaml            服务器生产服务与自动重启策略
+compose.orbstack.yaml   OrbStack 本机开发 / 回滚服务
+scripts/                OrbStack 本机安全部署脚本
 ```
 
 ## 有意保留的限制
