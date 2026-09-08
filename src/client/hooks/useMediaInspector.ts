@@ -23,6 +23,7 @@ export function useMediaInspector(
   csrfToken = "",
   item: DiscoveryMedia | null = null,
   enabled = false,
+  fetchReleases = true,
 ): MediaInspectorState {
   const itemKey = item ? `${item.mediaType}:${item.id}` : "";
   const [details, setDetails] = useState<DiscoveryItemDetails | null>(null);
@@ -44,7 +45,7 @@ export function useMediaInspector(
   }, [itemKey]);
 
   useEffect(() => {
-    if (!enabled || !csrfToken || !item) {
+    if (!enabled || !fetchReleases || !csrfToken || !item) {
       setReleaseLoading(false);
       setReleaseResponse(null);
       setReleaseError(null);
@@ -68,7 +69,7 @@ export function useMediaInspector(
     return () => {
       current = false;
     };
-  }, [client, csrfToken, enabled, item, itemKey, releaseRevision]);
+  }, [client, csrfToken, enabled, fetchReleases, item, itemKey, releaseRevision]);
 
   useEffect(() => {
     if (!enabled || !csrfToken || !item) {

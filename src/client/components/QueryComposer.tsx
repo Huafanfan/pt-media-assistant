@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip } from "lucide-react";
+import { ArrowUp, Paperclip, X } from "lucide-react";
 import { FormEvent, KeyboardEvent } from "react";
 
 export function QueryComposer({
@@ -6,13 +6,19 @@ export function QueryComposer({
   onChange,
   onSubmit,
   loading,
-  disabled = false
+  disabled = false,
+  onCancel,
+  placeholder = "输入电影或剧集名称",
+  inputLabel = "输入电影或剧集名称"
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   loading: boolean;
   disabled?: boolean;
+  onCancel?: () => void;
+  placeholder?: string;
+  inputLabel?: string;
 }) {
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -29,7 +35,7 @@ export function QueryComposer({
         <Paperclip size={24} strokeWidth={1.6} />
       </span>
       <label className="sr-only" htmlFor="query-input">
-        搜索作品
+        {inputLabel}
       </label>
       <textarea
         id="query-input"
@@ -37,17 +43,18 @@ export function QueryComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="输入电影或剧集名称"
-        disabled={disabled || loading}
-        aria-label="输入电影或剧集名称"
+        placeholder={placeholder}
+        disabled={disabled || (loading && !onCancel)}
+        aria-label={inputLabel}
       />
       <button
         className="send-button"
-        type="submit"
-        disabled={disabled || loading || !value.trim()}
-        aria-label={loading ? "正在搜索" : "发送搜索"}
+        type={loading && onCancel ? "button" : "submit"}
+        disabled={disabled || (!loading && !value.trim())}
+        onClick={loading && onCancel ? onCancel : undefined}
+        aria-label={loading ? (onCancel ? "取消推荐" : "正在搜索") : "发送搜索"}
       >
-        <ArrowUp size={25} strokeWidth={1.8} aria-hidden="true" />
+        {loading && onCancel ? <X size={24} strokeWidth={1.8} aria-hidden="true" /> : <ArrowUp size={25} strokeWidth={1.8} aria-hidden="true" />}
       </button>
     </form>
   );

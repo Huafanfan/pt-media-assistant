@@ -15,6 +15,9 @@ export const DEFAULT_SESSION_COOKIE = "pt_media_session";
 export const DEFAULT_NAS_SENTINEL_NAME = ".pt-media-assistant-mounted";
 export const RELEASE_CACHE_TTL_MS = 15 * 60 * 1000;
 export const UPSTREAM_TIMEOUT_MS = 65 * 1000;
+export const DEFAULT_AI_MODEL = "gpt-5.6-luna";
+export const DEFAULT_AI_PROVIDER_TIMEOUT_MS = 30 * 1000;
+export const DEFAULT_AI_TURN_TIMEOUT_MS = 60 * 1000;
 
 export type NasCheckMode = "smbfs" | "sentinel";
 
@@ -37,6 +40,13 @@ export type AppConfig = {
   configuredOrigin?: string;
   allowGrab: boolean;
   trustLan: boolean;
+  /** AI settings are optional for backwards-compatible test/deployment configs. */
+  aiEnabled?: boolean;
+  aiBaseUrl?: string;
+  aiApiKey?: string;
+  aiModel?: string;
+  aiProviderTimeoutMs?: number;
+  aiTurnTimeoutMs?: number;
 };
 
 function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -118,6 +128,22 @@ function parseBoolean(value: string | undefined, fallback = false): boolean {
   return /^(?:1|true|yes|on)$/iu.test(value);
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number, field: string): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return parsed;
+}
+
+function parseAiBaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) return undefined;
+    return parsed.toString().replace(/\/$/u, "");
+  } catch { return undefined; }
+}
+
 function parseNasCheckMode(value: string | undefined): NasCheckMode {
   if (!value || value === "smbfs") return "smbfs";
   if (value === "sentinel") return "sentinel";
@@ -149,6 +175,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("PT_MEDIA_NAS_STATUS_PATH must be an absolute local path");
   }
 
+  const aiEnabled = parseBoolean(readEnv(env, "PT_MEDIA_AI_ENABLED"));
+  const aiBaseUrl = parseAiBaseUrl(readEnv(env, "TRANS_STATION_BASE_URL"));
+  const aiApiKey = readEnv(env, "TRANS_STATION_API_KEY")
+    ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
+  const aiModel = readEnv(env, "PT_MEDIA_AI_MODEL") ?? DEFAULT_AI_MODEL;
+  const aiProviderTimeoutMs = parsePositiveInteger(
+    readEnv(env, "PT_MEDIA_AI_PROVIDER_TIMEOUT_MS"),
+    DEFAULT_AI_PROVIDER_TIMEOUT_MS,
+    "PT_MEDIA_AI_PROVIDER_TIMEOUT_MS",
+  );
+  const aiTurnTimeoutMs = parsePositiveInteger(
+    readEnv(env, "PT_MEDIA_AI_TURN_TIMEOUT_MS"),
+    DEFAULT_AI_TURN_TIMEOUT_MS,
+    "PT_MEDIA_AI_TURN_TIMEOUT_MS",
+  );
+
   return {
     host: readEnv(env, "PT_MEDIA_HOST") ?? DEFAULT_HOST,
     port: parsePort(readEnv(env, "PT_MEDIA_PORT")),
@@ -167,6 +209,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
     allowGrab: parseBoolean(readEnv(env, "PT_MEDIA_ALLOW_GRAB")),
     trustLan: parseBoolean(readEnv(env, "PT_MEDIA_TRUST_LAN"), true),
+    aiEnabled,
+    ...(aiBaseUrl ? { aiBaseUrl } : {}),
+    ...(aiApiKey ? { aiApiKey } : {}),
+    aiModel,
+    aiProviderTimeoutMs,
+    aiTurnTimeoutMs,
     ...(configuredOrigin ? { configuredOrigin: parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN") } : {}),
   };
 }

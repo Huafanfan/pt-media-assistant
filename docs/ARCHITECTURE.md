@@ -19,7 +19,7 @@ iPhone browser
 
 - TJUPT Cookie stays inside Prowlarr. The app never reads it.
 - The Prowlarr API key is read at runtime from a mode-0600 server secret file (or local config in native macOS mode); it is never sent to the browser or logged.
-- Prowlarr release download URLs and GUIDs stay in a short-lived server-side cache. The browser receives an opaque random release ID.
+- Prowlarr release download URLs and GUIDs stay in a bounded server-side cache (15 minutes for ordinary search; references held by discovery snapshots share the snapshot lifetime, up to 24 hours). The browser receives an opaque random release ID.
 - Auto sessions are issued only to actual loopback, RFC1918, or link-local socket peers; proxy headers are not trusted.
 - Grab requests require a session, exact-origin/CSRF checks, a fresh NAS sentinel check, an opaque release ID, and `confirm: true`.
 - qBittorrent responses are reduced to safe status fields. Tracker URLs and passkeys are never returned.
@@ -93,6 +93,9 @@ Safe server start sequence:
 - `POST /api/discovery/media/:mediaType/:itemId/releases/refresh?limit=`: explicitly replaces that canonical subject's availability snapshot.
 - `GET /api/discovery/collections/:collection/items/:itemId/releases?page=&limit=`: compatibility route for collection-originated entries; it resolves the canonical media entity first, then shares the media-type/subject-id availability snapshot. The browser paginates that snapshot locally in groups of 10.
 - `POST /api/discovery/collections/:collection/items/:itemId/releases/refresh?page=&limit=`: explicitly bypasses the availability cache, performs a throttled Prowlarr search, and replaces the server-side result.
+- `POST /api/assistant/turns`: authenticated/CSRF-protected bounded AI turn, optional behind `PT_MEDIA_AI_ENABLED`; owns conversation state and returns validated cards.
+- `POST /api/assistant/turns/:turnId/cancel`: cancels an owned turn; accepts the initial owner-scoped client ID until the independent server turn ID is returned.
+- `DELETE /api/assistant/conversations/:id`: clears an owned conversation and aborts active work.
 - `POST /api/search`: validates a natural-language query, searches Prowlarr, stores raw releases server-side, and returns sanitized summaries.
 - `POST /api/grab/preview`: revalidates the release, NAS mount, and duplicate state.
 - `POST /api/grab`: repeats all checks and asks Prowlarr to send the release to qBittorrent.
@@ -102,8 +105,8 @@ Safe server start sequence:
 ## Deliberate MVP constraints
 
 - Discovery uses public, undocumented Douban web collection, subject-detail, and actor/filmography data behind a dedicated adapter, a two-hour page/detail/poster/profile cache, in-flight coalescing, and stale-cache fallback. Upstream shape changes can degrade discovery without affecting manual search or downloading.
-- PT discovery checks are globally serialized with a 1.2-second minimum start interval. Availability results are cached in the backend process per collection, page, and item for up to 24 hours, including empty results, with at most 50 candidates retained per snapshot. The browser paginates that snapshot locally; the browser does not decide the cache lifetime, and the explicit refresh action is available when a user wants a newer result.
-- The recommendation surface is deterministic public ranking data, not a personalized Douban login or external LLM integration.
+- PT discovery checks are globally serialized with a 1.2-second minimum start interval. Availability results are cached in the backend process per canonical media type and item ID for up to 24 hours, including empty results, with at most 50 candidates retained per snapshot. The browser paginates that snapshot locally; the browser does not decide the cache lifetime, and the explicit refresh action is available when a user wants a newer result.
+- Discovery rankings remain deterministic. The optional AI recommendation mode uses a server-side AI SDK compatible provider and bounded read-only tools; preferences and minimal public metadata/release summaries reach the configured model gateway. It cannot invoke grab. See [AI operations](AI_OPERATIONS.md) and [AI-001](features/AI_RECOMMENDATION.md).
 - LAN sessions are in memory and expire when the server restarts.
 - The client polls sanitized torrent and storage status every 15 seconds while the document is visible, pauses automatic requests while hidden, and refreshes once immediately when visibility returns. It never receives tracker URLs, passkeys, or raw mount output.
 - The initial qBittorrent state follows the Prowlarr download-client setting; the configured client now uses `started` for the one-step flow.

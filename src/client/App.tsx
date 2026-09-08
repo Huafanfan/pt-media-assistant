@@ -1,16 +1,21 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import type {
   DiscoveryActor,
   DiscoveryActorWork,
   DiscoveryCollectionId,
   DiscoveryItem,
   DiscoveryMedia,
+  DiscoveryReleaseResponse,
   GrabResponse,
   ReleaseSummary
 } from "../shared/contracts";
+import type { AssistantRecommendationCard } from "../shared/assistant";
 import { ApiError, apiClient, type ApiClient } from "./api";
 import { AppHeader } from "./components/AppHeader";
 import { ActorView } from "./components/ActorView";
+import { AssistantPreferences } from "./components/AssistantPreferences";
+import { AssistantRecommendations } from "./components/AssistantRecommendations";
+import { AssistantThread } from "./components/AssistantThread";
 import { ChatThread } from "./components/ChatThread";
 import { DiscoveryBrowser } from "./components/DiscoveryBrowser";
 import { MediaInspector } from "./components/MediaInspector";
@@ -25,6 +30,7 @@ import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
 import { useDiscovery } from "./hooks/useDiscovery";
 import { useDiscoveryActor } from "./hooks/useDiscoveryActor";
 import { useMediaInspector } from "./hooks/useMediaInspector";
+import { useAssistant } from "./hooks/useAssistant";
 import { useServiceBootstrap } from "./hooks/useServiceBootstrap";
 import type { ChatMessage, SearchState, SelectionState } from "./types";
 import "./styles.css";
@@ -46,10 +52,77 @@ function initialAssistantMessage(total: number): string {
   return `找到 ${total} 部作品，选择作品查看详情和片源。`;
 }
 
+function assistantCardMedia(card: AssistantRecommendationCard): DiscoveryMedia {
+  return {
+    id: card.mediaId,
+    title: card.title,
+    ...(card.originalTitle ? { originalTitle: card.originalTitle } : {}),
+    ...(card.year ? { year: card.year } : {}),
+    mediaType: card.mediaType,
+    genres: card.genres,
+    summary: card.summary,
+    sourceUrl: ""
+  };
+}
+
+function assistantCardReleases(card: AssistantRecommendationCard): DiscoveryReleaseResponse {
+  return {
+    ...(card.snapshotId ? { snapshotId: card.snapshotId } : {}),
+    ...(card.expiresAt ? { expiresAt: card.expiresAt } : {}),
+    ...(card.actionableUntil ? { actionableUntil: card.actionableUntil } : {}),
+    itemId: card.mediaId,
+    query: `${card.title}${card.year ? ` ${card.year}` : ""}`,
+    status: card.availability === "available" ? "available" : card.availability === "possible" ? "possible" : "unavailable",
+    checkedAt: card.checkedAt ?? new Date(0).toISOString(),
+    total: card.rankedReleases.length,
+    releases: card.rankedReleases
+  };
+}
+
+function assistantReleaseResponseExpired(response: DiscoveryReleaseResponse | null | undefined): boolean {
+  const expires = response?.actionableUntil ?? response?.expiresAt;
+  return Boolean(expires && Number.isFinite(Date.parse(expires)) && Date.parse(expires) <= Date.now());
+}
+
+function assistantDownloadIntent(message: string): boolean {
+  return /(?:下载|加入下载|抓取)|(?:帮我|我要|我想).{0,12}(?:下|抓)/u.test(message);
+}
+
+function parseAssistantOrdinal(value: string): number | null {
+  if (/^\d+$/u.test(value)) {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
+  }
+  const direct: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  if (direct[value]) return direct[value];
+  if (value.length === 2 && value.startsWith("十")) {
+    const ones = direct[value[1] ?? ""];
+    return ones ? 10 + ones : null;
+  }
+  if (value.length === 2 && value.endsWith("十")) {
+    const tens = direct[value[0] ?? ""];
+    return tens ? tens * 10 : null;
+  }
+  if (value.length === 3 && value[1] === "十") {
+    const tens = direct[value[0] ?? ""];
+    const ones = direct[value[2] ?? ""];
+    return tens && ones ? tens * 10 + ones : null;
+  }
+  return null;
+}
+
+export function assistantReferenceIndex(message: string): number | null {
+  const match = message.match(/第\s*([0-9]+|[一二三四五六七八九十]+)\s*(?:部|个版本?|项)?/u);
+  if (!match) return null;
+  const value = parseAssistantOrdinal(match[1] ?? "");
+  return value === null ? null : value - 1;
+}
+
 type MediaOrigin =
   | { kind: "collection"; collection: DiscoveryCollectionId; page: number }
   | { kind: "actor"; actorName: string }
-  | { kind: "search"; query: string };
+  | { kind: "search"; query: string }
+  | { kind: "assistant"; cardId: string };
 
 type ActorNavigationEntry = {
   actorName: string | null;
@@ -80,6 +153,12 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [grabResult, setGrabResult] = useState<GrabResponse | null>(null);
+  const assistant = useAssistant(client, csrfToken, paired);
+  const [assistantSelectedCard, setAssistantSelectedCard] = useState<AssistantRecommendationCard | null>(null);
+  const [assistantReleaseResponses, setAssistantReleaseResponses] = useState<Record<string, DiscoveryReleaseResponse>>({});
+  const [assistantReleaseLoading, setAssistantReleaseLoading] = useState(false);
+  const [assistantReleaseError, setAssistantReleaseError] = useState<string | null>(null);
+  const assistantRefreshRevision = useRef(0);
   const runtime = useRuntimeStatus(client, csrfToken, paired);
   const discovery = useDiscovery(client, csrfToken, paired);
   const [selectedMediaItem, setSelectedMediaItem] = useState<DiscoveryMedia | null>(null);
@@ -93,7 +172,8 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     client,
     csrfToken,
     selectedMediaItem,
-    Boolean(selectedMediaItem && mediaOrigin && mediaOrigin.kind !== "collection")
+    Boolean(selectedMediaItem && mediaOrigin && mediaOrigin.kind !== "collection"),
+    mediaOrigin?.kind !== "assistant"
   );
   const runtimeStatus = paired ? (
     <RuntimeStatusBar
@@ -191,7 +271,59 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     }
   };
 
+  const handleAssistantCard = (card: AssistantRecommendationCard) => {
+    if (confirmLoading) return;
+    const existingSnapshot = assistantReleaseResponses[card.cardId];
+    const snapshot = existingSnapshot ?? assistantCardReleases(card);
+    assistantRefreshRevision.current += 1;
+    setAssistantSelectedCard(card);
+    setAssistantReleaseResponses((current) => ({
+      ...current,
+      [card.cardId]: current[card.cardId] ?? assistantCardReleases(card)
+    }));
+    setAssistantReleaseError(assistantReleaseResponseExpired(snapshot)
+      ? "这张推荐的片源引用已过期，请显式刷新后重新选择。"
+      : !existingSnapshot && card.availability === "error"
+        ? "这部作品的片源检查失败，请显式刷新后重试。"
+        : !existingSnapshot && card.availability === "unchecked"
+          ? "这部作品尚未检查片源，请显式刷新后查看候选。"
+          : null);
+    setAssistantReleaseLoading(false);
+    setSelectedMediaItem(assistantCardMedia(card));
+    setMediaOrigin({ kind: "assistant", cardId: card.cardId });
+    setSelectedActorName(null);
+    setActorHistory([]);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
+    resetReleaseSelection();
+  };
+
+  const handleAssistantSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextQuery = query.trim();
+    if (!nextQuery || assistant.loading) return;
+    // References such as “第二部” belong to the cards visible before this
+    // turn. Keep that snapshot stable while the server generates the reply.
+    const displayedCards = assistant.cards;
+    const displayedSelection = assistantSelectedCard;
+    setQuery("");
+    const response = await assistant.submit(nextQuery);
+    if (!response || !assistantDownloadIntent(nextQuery)) return;
+
+    const requestedIndex = assistantReferenceIndex(nextQuery);
+    const card = requestedIndex !== null
+      ? displayedCards[requestedIndex]
+      : displayedSelection;
+    if (card) handleAssistantCard(card);
+  };
+
   const handleSelect = async (release: ReleaseSummary, index: number) => {
+    if (mediaOrigin?.kind === "assistant") {
+      const snapshot = assistantReleaseResponses[mediaOrigin.cardId];
+      if (assistantReleaseResponseExpired(snapshot)) {
+        setAssistantReleaseError("片源引用已过期，请刷新后重新选择。"); return;
+      }
+    }
     if (!csrfToken || selectingId) {
       return;
     }
@@ -220,6 +352,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
   const handleModeChange = (nextMode: AppMode) => {
     if (nextMode === mode || confirmLoading) return;
+    assistantRefreshRevision.current += 1;
     setMode(nextMode);
     setInspectorExpanded(false);
     setSelection(null);
@@ -227,6 +360,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     setGrabResult(null);
     setSelectedMediaItem(null);
     setMediaOrigin(null);
+    setAssistantSelectedCard(null);
+    setAssistantReleaseError(null);
+    setAssistantReleaseLoading(false);
     setSelectedActorName(null);
     setActorHistory([]);
     setDiscoveryInspectorError(null);
@@ -318,8 +454,12 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
   const closeMediaInspector = () => {
     if (confirmLoading) return;
+    assistantRefreshRevision.current += 1;
     setSelectedMediaItem(null);
     setMediaOrigin(null);
+    setAssistantSelectedCard(null);
+    setAssistantReleaseError(null);
+    setAssistantReleaseLoading(false);
     setDiscoveryInspectorError(null);
     setDiscoveryDetailsError(null);
     setInspectorExpanded(false);
@@ -327,6 +467,39 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
   const retryDiscoveryItem = () => {
     if (!selectedMediaItem || !mediaOrigin) return;
+    if (mediaOrigin.kind === "assistant") {
+      if (!client.refreshDiscoveryMediaReleases) {
+        setAssistantReleaseError("片源刷新暂时不可用，请按片名搜索。");
+        return;
+      }
+      const cardId = mediaOrigin.cardId;
+      const revision = assistantRefreshRevision.current + 1;
+      assistantRefreshRevision.current = revision;
+      setAssistantReleaseLoading(true);
+      setAssistantReleaseError(null);
+      void client.refreshDiscoveryMediaReleases(selectedMediaItem.mediaType, selectedMediaItem.id, csrfToken, 10)
+        .then((response) => {
+          if (assistantRefreshRevision.current !== revision) return;
+          setAssistantReleaseResponses((current) => ({ ...current, [cardId]: response }));
+          setAssistantSelectedCard((current) => current?.cardId === cardId
+            ? {
+                ...current,
+                ...(response.checkedAt ? { checkedAt: response.checkedAt } : {}),
+                ...(response.snapshotId ? { snapshotId: response.snapshotId } : {}),
+                ...(response.expiresAt ? { expiresAt: response.expiresAt } : {}),
+                ...(response.actionableUntil ? { actionableUntil: response.actionableUntil } : {})
+              }
+            : current);
+        })
+        .catch((error: unknown) => {
+          if (assistantRefreshRevision.current !== revision) return;
+          setAssistantReleaseError(readableError(error));
+        })
+        .finally(() => {
+          if (assistantRefreshRevision.current === revision) setAssistantReleaseLoading(false);
+        });
+      return;
+    }
     if (mediaOrigin.kind === "collection") {
       setDiscoveryInspectorError(null);
       void discovery.refreshAvailability(selectedMediaItem).then((result) => {
@@ -380,13 +553,13 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     ? discovery.detailsLoadingIds.has(selectedMediaItem.id)
     : standaloneMedia.detailsLoading);
   const selectedDetailsError = collectionOrigin ? discoveryDetailsError : standaloneMedia.detailsError;
-  const selectedReleases = selectedMediaItem && collectionOrigin
+  const selectedReleases = mediaOrigin?.kind === "assistant" ? assistantReleaseResponses[mediaOrigin.cardId] ?? null : selectedMediaItem && collectionOrigin
     ? discovery.availabilityById[selectedMediaItem.id] ?? null
     : standaloneMedia.releaseResponse;
-  const selectedReleaseLoading = Boolean(selectedMediaItem && collectionOrigin
+  const selectedReleaseLoading = mediaOrigin?.kind === "assistant" ? assistantReleaseLoading : Boolean(selectedMediaItem && collectionOrigin
     ? discovery.checkingIds.has(selectedMediaItem.id)
     : standaloneMedia.releaseLoading);
-  const selectedReleaseError = collectionOrigin ? discoveryInspectorError : standaloneMedia.releaseError;
+  const selectedReleaseError = mediaOrigin?.kind === "assistant" ? assistantReleaseError : collectionOrigin ? discoveryInspectorError : standaloneMedia.releaseError;
 
   const mediaInspector = selectedMediaItem ? (
     <div className="discovery-inspector-stack">
@@ -530,6 +703,20 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
             </section>
 
             {activeInspector}
+          </>
+        ) : mode === "assistant" ? (
+          <>
+            <section className="chat-pane assistant-pane" aria-label="AI 推荐对话">
+              <div className="search-mode-toolbar"><ModeSwitch mode={mode} onChange={handleModeChange} /></div>
+              <div className="assistant-toolbar"><span>说说今天想看什么</span><button type="button" className="outline-button" onClick={() => { void assistant.clear(); resetReleaseSelection(); closeMediaInspector(); }}>清空对话</button></div>
+              <AssistantPreferences preferences={assistant.preferences} />
+              <AssistantThread messages={assistant.messages} />
+            </section>
+            <aside className="results-pane" aria-label="推荐作品"><div className="results-scroll">
+              <AssistantRecommendations cards={assistant.cards} snapshots={assistantReleaseResponses} selectedCardId={assistantSelectedCard?.cardId ?? null} onSelect={handleAssistantCard} onFallback={() => handleModeChange("search")} error={assistant.error} errorCode={assistant.errorCode} loading={assistant.loading} />
+            </div></aside>
+            {activeInspector}
+            <div className="composer-dock"><QueryComposer value={query} onChange={setQuery} onSubmit={handleAssistantSubmit} loading={assistant.loading} disabled={!paired} onCancel={() => void assistant.cancel()} placeholder="例如：轻松的科幻电影，1080p，15GB 以内" inputLabel="描述想看的类型和要求" /></div>
           </>
         ) : (
           <>

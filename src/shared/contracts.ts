@@ -51,6 +51,13 @@ export type ReleaseSummary = {
   resolution?: string;
   codec?: string;
   freeleech: boolean;
+  freeleechState?: "yes" | "no" | "unknown";
+  evidence?: {
+    resolution: "upstream" | "title_inferred" | "unknown";
+    codec: "upstream" | "title_inferred" | "unknown";
+    size: "upstream" | "unknown";
+    seeders: "upstream" | "unknown";
+  };
 };
 
 export type SearchResponse = {
@@ -135,6 +142,9 @@ export type DiscoveryCollectionResponse = {
 export type DiscoveryReleaseStatus = "available" | "possible" | "unavailable";
 
 export type DiscoveryReleaseResponse = {
+  snapshotId?: string;
+  expiresAt?: string;
+  actionableUntil?: string;
   itemId: string;
   query: string;
   status: DiscoveryReleaseStatus;

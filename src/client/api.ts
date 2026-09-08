@@ -20,6 +20,11 @@ import type {
   SessionResponse,
   TorrentSummary
 } from "../shared/contracts";
+import {
+  assistantTurnResponseSchema,
+  type AssistantTurnRequest,
+  type AssistantTurnResponse
+} from "../shared/assistant";
 
 export const DESTINATION_PATH = "/Volumes/YourNAS/pt";
 
@@ -62,6 +67,18 @@ function cleanMessage(value: unknown): string {
   // malformed upstream value from being mistaken for interface markup.
   const withoutTags = value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   return withoutTags.slice(0, 240) || "请求失败，请稍后再试。";
+}
+
+function assistantResponseError(): ApiError {
+  return new ApiError("推荐响应格式无效，请按片名搜索。", 502, "AI_INVALID_OUTPUT");
+}
+
+function normalizeAssistantTurn(payload: unknown): AssistantTurnResponse {
+  const parsed = assistantTurnResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw assistantResponseError();
+  }
+  return parsed.data;
 }
 
 function parseJson(text: string): unknown {
@@ -147,6 +164,7 @@ function normalizeRelease(payload: unknown): ReleaseSummary | null {
     return null;
   }
 
+  const evidence = asRecord(value.evidence);
   const protocol = value.protocol === "usenet" ? "usenet" : "torrent";
   const categories = Array.isArray(value.categories)
     ? value.categories.filter((item): item is string => typeof item === "string").slice(0, 8)
@@ -165,7 +183,24 @@ function normalizeRelease(payload: unknown): ReleaseSummary | null {
     categories,
     ...(typeof value.resolution === "string" ? { resolution: value.resolution } : {}),
     ...(typeof value.codec === "string" ? { codec: value.codec } : {}),
-    freeleech: asBoolean(value.freeleech)
+    freeleech: asBoolean(value.freeleech),
+    ...(value.freeleechState === "yes" || value.freeleechState === "no" || value.freeleechState === "unknown"
+      ? { freeleechState: value.freeleechState }
+      : {}),
+    ...(evidence
+      ? {
+          evidence: {
+            resolution: evidence.resolution === "upstream" || evidence.resolution === "title_inferred"
+              ? evidence.resolution
+              : "unknown",
+            codec: evidence.codec === "upstream" || evidence.codec === "title_inferred"
+              ? evidence.codec
+              : "unknown",
+            size: evidence.size === "upstream" ? "upstream" : "unknown",
+            seeders: evidence.seeders === "upstream" ? "upstream" : "unknown"
+          }
+        }
+      : {})
   };
 }
 
@@ -488,6 +523,9 @@ export type ApiClient = {
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
   getStorage(csrfToken: string): Promise<NasStorageSummary>;
+  createAssistantTurn?(request: AssistantTurnRequest, csrfToken: string, signal?: AbortSignal): Promise<AssistantTurnResponse>;
+  cancelAssistantTurn?(turnId: string, csrfToken: string): Promise<void>;
+  clearAssistantConversation?(conversationId: string, csrfToken: string): Promise<void>;
 };
 
 function normalizeStorage(payload: unknown): NasStorageSummary {
@@ -684,6 +722,31 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
           headers: withCsrf(csrfToken)
         }, fetchImpl)
       );
+    },
+
+    async createAssistantTurn(request, csrfToken, signal) {
+      return normalizeAssistantTurn(
+        await requestJson<unknown>("/api/assistant/turns", {
+          method: "POST",
+          headers: withCsrf(csrfToken),
+          ...(signal ? { signal } : {}),
+          body: JSON.stringify(request)
+        }, fetchImpl)
+      );
+    },
+
+    async cancelAssistantTurn(turnId, csrfToken) {
+      await requestJson<unknown>(`/api/assistant/turns/${encodeURIComponent(turnId)}/cancel`, {
+        method: "POST",
+        headers: withCsrf(csrfToken)
+      }, fetchImpl);
+    },
+
+    async clearAssistantConversation(conversationId, csrfToken) {
+      await requestJson<unknown>(`/api/assistant/conversations/${encodeURIComponent(conversationId)}`, {
+        method: "DELETE",
+        headers: withCsrf(csrfToken)
+      }, fetchImpl);
     }
   };
 }

@@ -13,6 +13,13 @@ export class UpstreamError extends Error {
   }
 }
 
+export class UpstreamCancelledError extends Error {
+  public constructor() {
+    super("Upstream request cancelled");
+    this.name = "AbortError";
+  }
+}
+
 export class ReleaseNotFoundError extends Error {
   public constructor() {
     super("Release is no longer available");
@@ -42,7 +49,7 @@ export class ReleaseCache {
 
   public constructor(options: ReleaseCacheOptions = {}) {
     this.ttlMs = options.ttlMs ?? 15 * 60 * 1000;
-    this.maxEntries = options.maxEntries ?? 500;
+    this.maxEntries = options.maxEntries ?? 10_000;
     this.now = options.now ?? Date.now;
     this.idFactory = options.idFactory ?? (() => randomBytes(18).toString("base64url"));
   }
@@ -73,6 +80,14 @@ export class ReleaseCache {
 
   public delete(id: string): void {
     this.entries.delete(id);
+  }
+
+  /** Extend an existing opaque reference, never recreate or rebind an expired ID. */
+  public retain(id: string, expiresAt: number): boolean {
+    if (!this.get(id)) return false;
+    const entry = this.entries.get(id)!;
+    entry.expiresAt = Math.max(entry.expiresAt, Math.min(expiresAt, this.now() + 24 * 60 * 60 * 1000));
+    return true;
   }
 
   public get size(): number {
@@ -156,7 +171,21 @@ function categoryNames(value: unknown): string[] {
 function isFreeleech(raw: JsonObject): boolean {
   if (raw.freeleech === true || raw.isFreeleech === true || raw.freeLeech === true) return true;
   const flags = raw.indexerFlags;
-  return Array.isArray(flags) && flags.some((flag) => /freeleech|free-leech|免费/iu.test(String(flag)));
+  return Array.isArray(flags) && flags.some((flag) => {
+    const label = stringValue(flag).toLowerCase();
+    return label === "freeleech" || label === "free-leech" || label === "免费" || label === "免费下载";
+  });
+}
+
+function freeleechState(raw: JsonObject): "yes" | "no" | "unknown" {
+  if (isFreeleech(raw)) return "yes";
+  if ([raw.freeleech, raw.isFreeleech, raw.freeLeech].some((value) => value === false)) return "no";
+  return "unknown";
+}
+
+function hasNumber(value: unknown): boolean {
+  return (typeof value === "number" || (typeof value === "string" && value.trim() !== ""))
+    && Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
 /** Reduce one full Prowlarr ReleaseResource to the browser-safe contract. */
@@ -180,6 +209,13 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
     ...(inferResolution(title, raw) ? { resolution: inferResolution(title, raw) } : {}),
     ...(inferCodec(title, raw) ? { codec: inferCodec(title, raw) } : {}),
     freeleech: isFreeleech(raw),
+    freeleechState: freeleechState(raw),
+    evidence: {
+      resolution: normalizeResolution(getRawObjectValue(raw, "resolution", "quality")) ? "upstream" : inferResolution(title, raw) ? "title_inferred" : "unknown",
+      codec: boundedString(getRawObjectValue(raw, "codec", "videoCodec")) ? "upstream" : inferCodec(title, raw) ? "title_inferred" : "unknown",
+      size: hasNumber(raw.size) ? "upstream" : "unknown",
+      seeders: hasNumber(raw.seeders) ? "upstream" : "unknown",
+    },
   };
 }
 
@@ -195,7 +231,7 @@ export function sanitizeReleases(rawReleases: unknown[], cache: ReleaseCache): R
 }
 
 function matchesIntent(release: ReleaseSummary, intent: ParsedIntent): boolean {
-  if (intent.maxSizeBytes !== undefined && release.size > intent.maxSizeBytes) return false;
+  if (intent.maxSizeBytes !== undefined && (release.evidence?.size !== "upstream" || release.size > intent.maxSizeBytes)) return false;
   if (intent.freeleechOnly && !release.freeleech) return false;
   // A requested resolution is a hard constraint. Unknown-resolution entries
   // (for example soundtracks or books) must not leak into a 4K/1080p result.
@@ -252,16 +288,21 @@ export class ProwlarrClient {
       const response = await this.fetchImpl(this.endpoint(path), {
         ...init,
         headers,
-        signal: controller.signal,
+        signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
       });
+      if (init.signal?.aborted) throw new UpstreamCancelledError();
       if (!response.ok) throw new UpstreamError();
       if (response.status === 204 || response.status === 205) return undefined;
       try {
-        return await response.json();
+        const payload = await response.json();
+        if (init.signal?.aborted) throw new UpstreamCancelledError();
+        return payload;
       } catch {
+        if (init.signal?.aborted) throw new UpstreamCancelledError();
         throw new UpstreamError();
       }
     } catch (error) {
+      if (init.signal?.aborted) throw new UpstreamCancelledError();
       if (error instanceof UpstreamError) throw error;
       throw new UpstreamError();
     } finally {
@@ -269,7 +310,7 @@ export class ProwlarrClient {
     }
   }
 
-  public async search(intent: ParsedIntent, limit = 20): Promise<SearchResponse> {
+  public async search(intent: ParsedIntent, limit = 20, options: { signal?: AbortSignal } = {}): Promise<SearchResponse> {
     const startedAt = Date.now();
     const endpoint = this.endpoint("/api/v1/search");
     endpoint.searchParams.set("query", intent.searchTerm);
@@ -277,7 +318,7 @@ export class ProwlarrClient {
     endpoint.searchParams.set("limit", String(Math.min(50, Math.max(1, Math.floor(limit)))));
     endpoint.searchParams.set("offset", "0");
 
-    const payload = await this.request(endpoint.pathname + endpoint.search, { method: "GET" });
+    const payload = await this.request(endpoint.pathname + endpoint.search, { method: "GET", signal: options.signal });
     const rawReleases = asReleaseArray(payload);
     const all = sanitizeReleases(rawReleases, this.cache);
     const releases = all
@@ -297,6 +338,16 @@ export class ProwlarrClient {
     if (!raw) throw new ReleaseNotFoundError();
     return { raw, summary: sanitizeRelease(raw, releaseId) };
   }
+
+  public retainReleases(ids: string[], expiresAt: number): void {
+    for (const id of ids) this.cache.retain(id, expiresAt);
+  }
+
+  public releaseReleases(ids: string[]): void {
+    for (const id of ids) this.cache.delete(id);
+  }
+
+  public hasRelease(id: string): boolean { return Boolean(this.cache.get(id)); }
 
   /**
    * Prowlarr's GrabRelease contract is POST /api/v1/search with one complete

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   DiscoveryCollectionId,
   DiscoveryCollectionResponse,
@@ -67,7 +68,10 @@ export type DiscoveryDoubanClient = {
 export type DiscoverySearchResult = SearchResponse | ReleaseSummary[];
 
 export type DiscoveryProwlarrClient = {
-  search: (intent: ParsedIntent, limit?: number) => Promise<DiscoverySearchResult>;
+  search: (intent: ParsedIntent, limit?: number, options?: { signal?: AbortSignal }) => Promise<DiscoverySearchResult>;
+  retainReleases?: (ids: string[], expiresAt: number) => void;
+  releaseReleases?: (ids: string[]) => void;
+  hasRelease?: (id: string) => boolean;
 };
 
 export type DiscoveryServiceOptions = {
@@ -80,11 +84,27 @@ export type DiscoveryServiceOptions = {
 export type DiscoveryReleaseQueryOptions = {
   forceRefresh?: boolean;
   page?: number;
+  signal?: AbortSignal;
+  beforeSearch?: () => void;
 };
 
 type CachedReleases = {
   response: DiscoveryReleaseResponse;
   expiresAt: number;
+  releaseIds: string[];
+};
+
+type PendingReleaseWaiter = {
+  signal?: AbortSignal;
+  beforeSearch?: () => void;
+  active: boolean;
+};
+
+type PendingReleaseWork = {
+  controller: AbortController;
+  promise?: Promise<DiscoveryReleaseResponse>;
+  waiters: Set<PendingReleaseWaiter>;
+  finished: boolean;
 };
 
 export type DiscoveryDependencies = {
@@ -113,14 +133,50 @@ function seeders(value: ReleaseSummary): number {
 }
 
 function copyRelease(release: ReleaseSummary): ReleaseSummary {
+  const evidence = release.evidence;
   return {
-    ...release,
-    categories: Array.isArray(release.categories) ? [...release.categories] : [],
+    id: releaseId(release),
+    title: release.title,
+    indexer: release.indexer,
+    protocol: release.protocol === "usenet" ? "usenet" : "torrent",
+    size: release.size,
+    seeders: release.seeders,
+    leechers: release.leechers,
+    grabs: release.grabs,
+    ageDays: release.ageDays,
+    categories: Array.isArray(release.categories)
+      ? release.categories.filter((category): category is string => typeof category === "string").slice(0, 20)
+      : [],
+    ...(release.resolution !== undefined ? { resolution: release.resolution } : {}),
+    ...(release.codec !== undefined ? { codec: release.codec } : {}),
+    freeleech: release.freeleech === true,
+    ...(release.freeleechState === "yes" || release.freeleechState === "no" || release.freeleechState === "unknown"
+      ? { freeleechState: release.freeleechState }
+      : {}),
+    ...(evidence ? {
+      evidence: {
+        resolution: evidence.resolution === "upstream" || evidence.resolution === "title_inferred"
+          ? evidence.resolution
+          : "unknown",
+        codec: evidence.codec === "upstream" || evidence.codec === "title_inferred"
+          ? evidence.codec
+          : "unknown",
+        size: evidence.size === "upstream" ? "upstream" : "unknown",
+        seeders: evidence.seeders === "upstream" ? "upstream" : "unknown",
+      },
+    } : {}),
   };
+}
+
+function abortReason(signal?: AbortSignal): unknown {
+  return signal?.reason ?? new DOMException("The operation was aborted", "AbortError");
 }
 
 function cloneReleaseResponse(response: DiscoveryReleaseResponse): DiscoveryReleaseResponse {
   return {
+    ...(response.snapshotId ? { snapshotId: response.snapshotId } : {}),
+    ...(response.expiresAt ? { expiresAt: response.expiresAt } : {}),
+    ...(response.actionableUntil ? { actionableUntil: response.actionableUntil } : {}),
     itemId: response.itemId,
     query: response.query,
     status: response.status,
@@ -190,7 +246,7 @@ export class DiscoveryService {
   private readonly minIntervalMs: number;
   private readonly collectionLimit: number;
   private readonly releaseCache = new Map<string, CachedReleases>();
-  private readonly pendingReleases = new Map<string, Promise<DiscoveryReleaseResponse>>();
+  private readonly pendingReleases = new Map<string, PendingReleaseWork>();
   private ptQueue: Promise<unknown> = Promise.resolve();
   private lastPtCallAt: number | undefined;
 
@@ -277,26 +333,127 @@ export class DiscoveryService {
     const boundedLimit = normalizeDiscoveryLimit(limit);
     const normalizedItemId = String(itemId);
     const key = mediaKey(mediaType, normalizedItemId);
+    options.signal?.throwIfAborted();
+    this.evictExpiredSnapshots();
+    if (options.forceRefresh) this.removeSnapshot(key);
     const cached = this.releaseCache.get(key);
     if (!options.forceRefresh && cached && cached.expiresAt > this.now()) {
+      this.releaseCache.delete(key);
+      this.releaseCache.set(key, cached);
+      if (this.prowlarr.hasRelease && cached.response.releases.some((release) => !this.prowlarr.hasRelease!(release.id))) {
+        cached.response.actionableUntil = new Date(this.now()).toISOString();
+      }
       return cloneReleaseResponse(cached.response);
     }
 
     const existing = this.pendingReleases.get(key);
-    if (existing) return existing.then(cloneReleaseResponse);
-
-    const operation = this.queryReleases(mediaType, normalizedItemId, boundedLimit, key, knownMedia);
-    this.pendingReleases.set(key, operation);
-    try {
-      const response = await operation;
-      return cloneReleaseResponse(response);
-    } finally {
-      if (this.pendingReleases.get(key) === operation) this.pendingReleases.delete(key);
+    if (existing && !existing.finished && !existing.controller.signal.aborted) {
+      return this.waitForPending(existing, options);
     }
+    if (existing && this.pendingReleases.get(key) === existing) {
+      this.pendingReleases.delete(key);
+    }
+
+    const work: PendingReleaseWork = {
+      controller: new AbortController(),
+      waiters: new Set(),
+      finished: false,
+    };
+    this.pendingReleases.set(key, work);
+    const operation = this.queryReleases(mediaType, normalizedItemId, boundedLimit, key, knownMedia, {
+      ...(options.signal ? { signal: work.controller.signal } : {}),
+      beforeSearch: () => this.runBeforeSearch(work),
+    });
+    work.promise = operation;
+    void operation.then(
+      () => this.finishPending(key, work),
+      () => this.finishPending(key, work),
+    );
+    return this.waitForPending(work, options);
   }
 
   public clearReleaseCache(): void {
-    this.releaseCache.clear();
+    for (const key of [...this.releaseCache.keys()]) this.removeSnapshot(key);
+  }
+
+  private removeSnapshot(key: string): void {
+    const cached = this.releaseCache.get(key);
+    if (!cached) return;
+    this.releaseCache.delete(key);
+    this.prowlarr.releaseReleases?.(cached.releaseIds);
+  }
+
+  private evictExpiredSnapshots(): void {
+    const now = this.now();
+    for (const [key, value] of this.releaseCache) {
+      if (value.expiresAt <= now) this.removeSnapshot(key);
+    }
+  }
+
+  private finishPending(key: string, work: PendingReleaseWork): void {
+    work.finished = true;
+    if (this.pendingReleases.get(key) === work) this.pendingReleases.delete(key);
+  }
+
+  private runBeforeSearch(work: PendingReleaseWork): void {
+    const waiter = [...work.waiters].find((candidate) => (
+      candidate.active && !candidate.signal?.aborted && candidate.beforeSearch
+    ));
+    waiter?.beforeSearch?.();
+  }
+
+  private waitForPending(
+    work: PendingReleaseWork,
+    options: DiscoveryReleaseQueryOptions,
+  ): Promise<DiscoveryReleaseResponse> {
+    options.signal?.throwIfAborted();
+    const operation = work.promise;
+    if (!operation) return Promise.reject(new Error("Discovery release operation unavailable"));
+
+    const waiter: PendingReleaseWaiter = {
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.beforeSearch ? { beforeSearch: options.beforeSearch } : {}),
+      active: true,
+    };
+    work.waiters.add(waiter);
+
+    return new Promise<DiscoveryReleaseResponse>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        if (options.signal) options.signal.removeEventListener("abort", onAbort);
+        waiter.active = false;
+        work.waiters.delete(waiter);
+        if (!work.finished && work.waiters.size === 0) work.controller.abort();
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(abortReason(options.signal));
+      };
+
+      if (options.signal) {
+        if (options.signal.aborted) {
+          onAbort();
+          return;
+        }
+        options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+      void operation.then(
+        (response) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(cloneReleaseResponse(response));
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        },
+      );
+    });
   }
 
   private async findItem(
@@ -342,6 +499,20 @@ export class DiscoveryService {
       itemId: details.itemId,
       actors: details.actors.map((actor) => ({ ...actor })),
       directors: [...details.directors],
+    };
+  }
+
+  public async getMedia(mediaType: "movie" | "tv", itemId: string): Promise<DiscoveryMedia> {
+    if (!this.douban.getMedia) throw new Error("Discovery media unavailable");
+    const media = await this.douban.getMedia(itemId, mediaType);
+    return {
+      id: media.id, title: media.title, mediaType: media.mediaType,
+      genres: [...media.genres], summary: media.summary, sourceUrl: media.sourceUrl,
+      ...(media.originalTitle ? { originalTitle: media.originalTitle } : {}),
+      ...(media.year ? { year: media.year } : {}),
+      ...(media.rating !== undefined ? { rating: media.rating } : {}),
+      ...(media.ratingCount !== undefined ? { ratingCount: media.ratingCount } : {}),
+      ...(media.posterUrl ? { posterUrl: media.posterUrl } : {}),
     };
   }
 
@@ -413,6 +584,7 @@ export class DiscoveryService {
     limit: number,
     key: string,
     knownMedia?: DiscoveryMedia,
+    options: DiscoveryReleaseQueryOptions = {},
   ): Promise<DiscoveryReleaseResponse> {
     // The media summary is always sourced from an allowlisted Douban response
     // or from a server-known collection item; title/year data never comes
@@ -421,7 +593,7 @@ export class DiscoveryService {
     if (!item) throw new Error("Discovery media unavailable");
 
     const primaryQuery = item.originalTitle ? queryFor(item, "originalTitle") : queryFor(item, "title");
-    const primary = await this.enqueuePtSearch(primaryQuery, DISCOVERY_RELEASE_FETCH_LIMIT);
+    const primary = await this.enqueuePtSearch(primaryQuery, DISCOVERY_RELEASE_FETCH_LIMIT, options);
     let releases = mergeReleases(asReleases(primary));
     let selectedQuery = primaryQuery;
 
@@ -430,36 +602,55 @@ export class DiscoveryService {
     // a request can make two PT upstream calls.
     if (item.originalTitle && releases.length === 0) {
       const fallbackQuery = queryFor(item, "title");
-      const fallback = await this.enqueuePtSearch(fallbackQuery, DISCOVERY_RELEASE_FETCH_LIMIT);
+      const fallback = await this.enqueuePtSearch(fallbackQuery, DISCOVERY_RELEASE_FETCH_LIMIT, options);
       releases = mergeReleases(releases, asReleases(fallback));
       selectedQuery = fallbackQuery;
     }
 
+    options.signal?.throwIfAborted();
     const status = statusFor(releases);
+    const expiresAt = this.now() + RELEASE_CACHE_TTL_MS;
+    const snapshotReleases = releases.slice(0, DISCOVERY_RELEASE_FETCH_LIMIT);
+    const releaseIds = [...new Set(snapshotReleases.map(releaseId))];
+    this.prowlarr.retainReleases?.(releaseIds, expiresAt);
     const response: DiscoveryReleaseResponse = {
+      snapshotId: randomUUID(),
+      expiresAt: new Date(expiresAt).toISOString(),
+      actionableUntil: new Date(expiresAt).toISOString(),
       itemId,
       query: selectedQuery,
       status,
       checkedAt: new Date(this.now()).toISOString(),
       total: releases.length,
-      releases: releases.slice(0, DISCOVERY_RELEASE_FETCH_LIMIT),
+      releases: snapshotReleases,
     };
-    this.releaseCache.set(key, { response, expiresAt: this.now() + RELEASE_CACHE_TTL_MS });
+    this.removeSnapshot(key);
+    this.releaseCache.set(key, { response, expiresAt, releaseIds });
+    while (this.releaseCache.size > 200) {
+      const oldest = this.releaseCache.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.removeSnapshot(oldest);
+    }
     return response;
   }
 
   /** Serialize all Prowlarr calls and enforce the inter-call interval. */
-  private enqueuePtSearch(query: string, limit: number): Promise<DiscoverySearchResult> {
+  private enqueuePtSearch(query: string, limit: number, options: DiscoveryReleaseQueryOptions = {}): Promise<DiscoverySearchResult> {
     let result: Promise<DiscoverySearchResult>;
     const previous = this.ptQueue;
     result = previous.then(async () => {
+      options.signal?.throwIfAborted();
       if (this.lastPtCallAt !== undefined) {
         const elapsed = this.now() - this.lastPtCallAt;
         const remaining = this.minIntervalMs - elapsed;
         if (remaining > 0) await this.sleep(remaining);
       }
+      options.signal?.throwIfAborted();
+      options.beforeSearch?.();
       this.lastPtCallAt = this.now();
-      return this.prowlarr.search({ searchTerm: query }, limit);
+      return options.signal
+        ? this.prowlarr.search({ searchTerm: query }, limit, { signal: options.signal })
+        : this.prowlarr.search({ searchTerm: query }, limit);
     });
     this.ptQueue = result.then(() => undefined, () => undefined);
     return result;

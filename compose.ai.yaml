@@ -1,0 +1,17 @@
+# Optional overlay: docker compose --env-file .env.server -f compose.yaml -f compose.ai.yaml up -d --build app
+# Provision the API key file separately, mode 0600. Base deployment stays AI-disabled.
+services:
+  app:
+    environment:
+      PT_MEDIA_AI_ENABLED: "1"
+      PT_MEDIA_AI_MODEL: "${PT_MEDIA_AI_MODEL:-gpt-5.6-luna}"
+      PT_MEDIA_AI_PROVIDER_TIMEOUT_MS: "${PT_MEDIA_AI_PROVIDER_TIMEOUT_MS:-30000}"
+      PT_MEDIA_AI_TURN_TIMEOUT_MS: "${PT_MEDIA_AI_TURN_TIMEOUT_MS:-60000}"
+      TRANS_STATION_BASE_URL: "${TRANS_STATION_BASE_URL:?Set the fixed HTTPS model API base URL}"
+      TRANS_STATION_API_KEY_FILE: /run/secrets/trans_station_api_key
+    secrets:
+      - source: trans_station_api_key
+        target: trans_station_api_key
+secrets:
+  trans_station_api_key:
+    file: "${TRANS_STATION_API_KEY_FILE:?Set the path to the mode-0600 model API key file}"

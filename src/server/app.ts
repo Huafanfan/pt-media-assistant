@@ -1,3 +1,8 @@
+import { assistantTurnRequestSchema } from "../shared/assistant.js";
+import { AssistantService } from "./ai/orchestrator.js";
+import { AssistantError } from "./ai/conversation-store.js";
+import { providerFromConfig, type CompatibleChatProvider } from "./ai/provider.js";
+import type { AssistantDiscovery } from "./ai/tools.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -56,6 +61,7 @@ export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getRelea
   getDetails?: DiscoveryService["getDetails"];
   getPoster?: DiscoveryService["getPoster"];
   getMediaDetails?: DiscoveryService["getMediaDetails"];
+  getMedia?: DiscoveryService["getMedia"];
   getMediaPoster?: DiscoveryService["getMediaPoster"];
   getMediaReleases?: DiscoveryService["getMediaReleases"];
   searchMedia?: DiscoveryService["searchMedia"];
@@ -66,6 +72,7 @@ export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getRelea
 
 export type AppServices = {
   config?: AppConfig;
+  aiProvider?: CompatibleChatProvider;
   pairing?: PairingService;
   sessions?: SessionStore;
   prowlarr?: ProwlarrService;
@@ -673,6 +680,59 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
       }
       return genericUpstreamError(reply);
     }
+  });
+
+  const aiProvider = config.aiEnabled ? services.aiProvider ?? (config.aiApiKey ? providerFromConfig(config) : undefined) : undefined;
+  const assistant = aiProvider && discovery.searchMedia && discovery.getMedia && discovery.getMediaDetails && discovery.getMediaReleases
+    ? new AssistantService(aiProvider, discovery as AssistantDiscovery, { timeoutMs: config.aiTurnTimeoutMs }) : undefined;
+  app.addHook("onClose", async () => { assistant?.close(); });
+  const aiFailure = (reply: FastifyReply, error: unknown) => {
+    const failure = error instanceof AssistantError ? error : new AssistantError("AI_UNAVAILABLE");
+    if (failure.retryAfter) reply.header("Retry-After", String(failure.retryAfter));
+    const labels: Record<string,string> = {
+      AI_DISABLED: "AI 推荐尚未启用，请按片名搜索。", AI_UNAVAILABLE: "AI 推荐服务暂不可用，请稍后重试。",
+      AI_TIMEOUT: "推荐超时，请缩小范围后重试。", AI_CANCELLED: "本轮推荐已取消。", AI_BUDGET_EXCEEDED: "已达到查询上限，请稍后重试。",
+      CONVERSATION_EXPIRED: "对话已过期，请清空后重新开始。", TURN_IN_PROGRESS: "已有推荐正在进行，请稍后重试。",
+      AI_INVALID_OUTPUT: "AI 回复未通过验证，请重试。", TURN_NOT_FOUND: "没有找到该轮推荐。",
+    };
+    return reply.code(failure.status).send({error:labels[failure.code]??"AI 推荐暂不可用。",code:failure.code});
+  };
+  app.post("/api/assistant/turns", async (request,reply) => {
+    if (!authenticate(request,reply,sessions,config.configuredOrigin)) return;
+    reply.header("Cache-Control","no-store");
+    if(!assistant) return aiFailure(reply,new AssistantError(config.aiEnabled?"AI_UNAVAILABLE":"AI_DISABLED"));
+    const parsed=assistantTurnRequestSchema.safeParse(request.body);
+    if(!parsed.success) return sendError(reply,400,"Invalid request","INVALID_REQUEST");
+    const controller=new AbortController();
+    const onClose=()=>{if(!reply.raw.writableEnded) controller.abort();};
+    request.raw.once("aborted",onClose); reply.raw.once("close",onClose);
+    const startedAt = Date.now();
+    try {
+      const result = await assistant.run(getSessionId(request)!,parsed.data,controller.signal);
+      request.log.info({ event: "assistant_turn", turnId: result.turnId, durationMs: Date.now()-startedAt, usage: result.usage, recommendationCount: result.recommendations.length });
+      return result;
+    }
+    catch(error) {
+      request.log.info({ event: "assistant_turn_failed", durationMs: Date.now()-startedAt, code: error instanceof AssistantError ? error.code : "AI_UNAVAILABLE" });
+      return aiFailure(reply,error);
+    }
+    finally {request.raw.off("aborted",onClose);reply.raw.off("close",onClose);}
+  });
+  app.post("/api/assistant/turns/:turnId/cancel", async(request,reply)=>{
+    if(!authenticate(request,reply,sessions,config.configuredOrigin)) return;
+    reply.header("Cache-Control","no-store");
+    const parsed=z.object({turnId:z.string().uuid()}).strict().safeParse(request.params);
+    if(!parsed.success) return sendError(reply,400,"Invalid request","INVALID_REQUEST");
+    try {if(!assistant) throw new AssistantError("AI_DISABLED"); assistant.cancel(getSessionId(request)!,parsed.data.turnId); return {cancelled:true};}
+    catch(e){return aiFailure(reply,e);}
+  });
+  app.delete("/api/assistant/conversations/:id",async(request,reply)=>{
+    if(!authenticate(request,reply,sessions,config.configuredOrigin)) return;
+    reply.header("Cache-Control","no-store");
+    const parsed=z.object({id:z.string().uuid()}).strict().safeParse(request.params);
+    if(!parsed.success) return sendError(reply,400,"Invalid request","INVALID_REQUEST");
+    try {if(!assistant) throw new AssistantError("AI_DISABLED");assistant.remove(getSessionId(request)!,parsed.data.id);return {deleted:true};}
+    catch(e){return aiFailure(reply,e);}
   });
 
   app.post("/api/search", {
