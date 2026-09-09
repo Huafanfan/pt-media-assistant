@@ -41,16 +41,18 @@ export function AppHeader({
     <header className="app-header">
       <div className="brand-lockup">
         <h1>片源助手</h1>
-        <p className={`service-status ${isHealthy ? "is-healthy" : "is-degraded"}`}>
-          <span className="status-dot" aria-hidden="true" />
-          <span>{statusText}</span>
-          {onRefresh ? (
-            <button className="service-status-refresh" type="button" onClick={onRefresh} aria-label="刷新状态">
-              <RefreshCw size={14} aria-hidden="true" />
-            </button>
-          ) : null}
-        </p>
-        {runtimeStatus}
+        <div className="header-status">
+          <p className={`service-status ${isHealthy ? "is-healthy" : "is-degraded"}`}>
+            <span className="status-dot" aria-hidden="true" />
+            <span>{statusText}</span>
+            {onRefresh ? (
+              <button className="service-status-refresh" type="button" onClick={onRefresh} aria-label="刷新状态">
+                <RefreshCw size={14} aria-hidden="true" />
+              </button>
+            ) : null}
+          </p>
+          <div className="header-status-runtime">{runtimeStatus}</div>
+        </div>
         {healthError ? <span className="sr-only">{healthError}</span> : null}
       </div>
     </header>

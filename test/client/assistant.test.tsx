@@ -2,12 +2,15 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { describe,it,expect,vi } from 'vitest';
 import { defaultAssistantPreferences, type AssistantRecommendationCard, type AssistantTurnResponse } from '../../src/shared/assistant';
 import { AssistantRecommendations } from '../../src/client/components/AssistantRecommendations';
+import { AssistantPreferences } from '../../src/client/components/AssistantPreferences';
+import { AssistantThread } from '../../src/client/components/AssistantThread';
 import { useAssistant } from '../../src/client/hooks/useAssistant';
 import { assistantReferenceIndex } from '../../src/client/App';
 import { ApiError } from '../../src/client/api';
 import type { ApiClient } from '../../src/client/api';
 const card:AssistantRecommendationCard={cardId:'card_12345678',mediaId:'1292267',mediaType:'movie',title:'银河系漫游指南',genres:['科幻'],summary:'太空喜剧',reason:'适合轻松观看',evidenceIds:['metadata:movie:1292267'],constraintResults:[],availability:'available',actionableUntil:new Date(Date.now()+86400000).toISOString(),rankedReleases:[]};
 const response:AssistantTurnResponse={conversationId:'11111111-1111-4111-8111-111111111111',turnId:'22222222-2222-4222-8222-222222222222',clientTurnId:'22222222-2222-4222-8222-222222222222',text:'推荐作品',preferences:defaultAssistantPreferences(),recommendations:[card],warnings:[]};
+const rankedRelease:AssistantRecommendationCard['rankedReleases'][number]={id:'release_12345678',title:'银河系漫游指南.1080p',indexer:'TJUPT',protocol:'torrent',size:2*1024**3,seeders:12,leechers:1,grabs:2,ageDays:3,categories:['Movies'],resolution:'1080p',codec:'x264',freeleech:false,rank:1,reasonCodes:['PREFERRED_RESOLUTION'],matchStatus:'confirmed'};
 describe('AI recommendation UI',()=>{
  it('opens a card without download and marks expired references',()=>{
   const select=vi.fn();render(<AssistantRecommendations cards={[{...card,actionableUntil:new Date(0).toISOString()}]} selectedCardId={null} onSelect={select} onFallback={()=>{}} error={null} loading={false}/>);
@@ -16,6 +19,25 @@ describe('AI recommendation UI',()=>{
  it('shows error fallback instead of empty-resource claims',()=>{
   const fallback=vi.fn();render(<AssistantRecommendations cards={[]} selectedCardId={null} onSelect={()=>{}} onFallback={fallback} error="PT 查询失败" loading={false}/>);
   expect(screen.getByRole('alert')).toHaveTextContent('PT 查询失败');fireEvent.click(screen.getByRole('button',{name:'按片名搜索'}));expect(fallback).toHaveBeenCalled();
+ });
+ it('keeps optional recommendation details collapsed until requested',()=>{
+  const preferences={...defaultAssistantPreferences(),mediaType:'movie' as const,includeGenres:['科幻'],resolution:'1080p' as const};
+  render(<><AssistantPreferences preferences={preferences}/><AssistantRecommendations cards={[{...card,rankedReleases:[rankedRelease]}]} selectedCardId={null} onSelect={()=>{}} onFallback={()=>{}} error={null} loading={false}/></>);
+  const preferenceDetails=screen.getByText('已应用偏好').closest('details');
+  const releaseDetails=screen.getByText('1 个优先片源').closest('details');
+  expect(preferenceDetails).not.toHaveAttribute('open');
+  expect(releaseDetails).not.toHaveAttribute('open');
+  expect(document.querySelectorAll('.assistant-preference-chip')).toHaveLength(0);
+  fireEvent.click(screen.getByText('1 个优先片源'));
+  expect(releaseDetails).toHaveAttribute('open');
+ });
+ it('keeps supplementary warnings collapsed by default',()=>{
+  render(<AssistantThread messages={[{id:'warning-message',role:'assistant',text:'推荐这 1 部。',createdAt:Date.now(),warnings:[{code:'SOURCE_UNAVAILABLE',message:'片源检查暂时不可用。'}]}]}/>);
+  const details=screen.getByText('1 条补充说明').closest('details');
+  expect(details).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByText('1 条补充说明'));
+  expect(details).toHaveAttribute('open');
+  expect(screen.getByText('片源检查暂时不可用。')).toBeVisible();
  });
  it('reuses conversation and replaces the displayed recommendation set on followup',async()=>{
   const submit=vi.fn().mockResolvedValueOnce(response).mockResolvedValueOnce({...response,recommendations:[],text:'已排除看过的作品'});

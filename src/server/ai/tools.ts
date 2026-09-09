@@ -45,11 +45,13 @@ export class ToolRunner {
       const response = await this.discovery.searchMedia(args.query, args.limit);
       this.signal.throwIfAborted();
       const items = [];
-      // Enrich at most two matches per title. All other lookups remain explicit bounded tools.
-      for (const found of response.items.slice(0, 2)) {
+      // Independent metadata requests overlap; publish in search-result order.
+      const enriched = await Promise.all(response.items.slice(0, 2).map(async (found) => {
         this.signal.throwIfAborted();
-        let media = found;
-        try { media = await this.discovery.getMedia(found.mediaType, found.id); } catch { this.warnings.push({code:'METADATA_PARTIAL',message:'部分作品详情未能核实。',mediaId:found.id}); }
+        try { return await this.discovery.getMedia(found.mediaType, found.id); }
+        catch { this.warnings.push({code:'METADATA_PARTIAL',message:'部分作品详情未能核实。',mediaId:found.id}); return found; }
+      }));
+      for (const media of enriched) {
         this.signal.throwIfAborted();
         const key = `${media.mediaType}:${media.id}`;
         const previous = this.conversation.candidates.get(key);

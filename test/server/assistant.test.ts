@@ -68,6 +68,29 @@ describe('AI turns and boundaries',()=>{
   expect(d.getMediaReleases).toHaveBeenCalledTimes(1);
   expect(result.recommendations[0]?.availability).toBe('available');
  });
+ it('overlaps automatic PT checks and preserves recommendation order',async()=>{
+  const second={...media,id:'1292268',title:'另一部科幻'};
+  const waiting=new Map<string,()=>void>();
+  const d={...discovery(),
+   searchMedia:vi.fn(async()=>({query:'',total:2,items:[media,second]})),
+   getMedia:vi.fn(async (_type:string,id:string)=>id===second.id?second:media),
+   getMediaReleases:vi.fn(async (_type:string,id:string)=>{
+    await new Promise<void>(resolve=>waiting.set(id,resolve));
+    return {...snapshot,itemId:id,releases:[{...release,title:`${id===second.id?second.title:media.title} 2005 1080p`}]};
+   })};
+  const p=provider([tool('resolve_media',{query:media.title}),{role:'assistant',content:JSON.stringify({recommendations:[{mediaId:media.id},{mediaId:second.id}]})}]);
+  const s=new AssistantService(p,d);
+  try {
+   const pending=s.run('o',{clientTurnId:randomUUID(),message:'科幻'});
+   await vi.waitFor(()=>expect(waiting.size).toBe(2));
+   waiting.get(second.id)!();
+   waiting.get(media.id)!();
+   const result=await pending;
+   expect(result.recommendations.map(card=>card.mediaId)).toEqual([media.id,second.id]);
+   expect(result.recommendations.every(card=>card.availability==='available')).toBe(true);
+   expect(result.usage.modelRequests).toBe(2);
+  } finally {s.close();}
+ });
  it('deduplicates failed PT checks within one turn',async()=>{
   const d=discovery();
   const store=new ConversationStore(),c=store.start('o',randomUUID()).turn.conversation;

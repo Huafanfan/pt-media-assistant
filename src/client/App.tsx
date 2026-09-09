@@ -708,7 +708,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
           <>
             <section className="chat-pane assistant-pane" aria-label="AI 推荐对话">
               <div className="search-mode-toolbar"><ModeSwitch mode={mode} onChange={handleModeChange} /></div>
-              <div className="assistant-toolbar"><span>说说今天想看什么</span><button type="button" className="outline-button" onClick={() => { void assistant.clear(); resetReleaseSelection(); closeMediaInspector(); }}>清空对话</button></div>
+              {assistant.messages.length > 0 ? (
+                <div className="assistant-toolbar"><button type="button" className="text-button" onClick={() => { void assistant.clear(); resetReleaseSelection(); closeMediaInspector(); }}>清空对话</button></div>
+              ) : null}
               <AssistantPreferences preferences={assistant.preferences} />
               <AssistantThread messages={assistant.messages} />
             </section>
