@@ -691,7 +691,7 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     if (failure.retryAfter) reply.header("Retry-After", String(failure.retryAfter));
     const labels: Record<string,string> = {
       AI_DISABLED: "AI 推荐尚未启用，请按片名搜索。", AI_UNAVAILABLE: "AI 推荐服务暂不可用，请稍后重试。",
-      AI_TIMEOUT: "推荐超时，请缩小范围后重试。", AI_CANCELLED: "本轮推荐已取消。", AI_BUDGET_EXCEEDED: "已达到查询上限，请稍后重试。",
+      AI_TIMEOUT: "推荐服务响应超时，请稍后重试。", AI_CANCELLED: "本轮推荐已取消。", AI_BUDGET_EXCEEDED: "已达到查询上限，请稍后重试。",
       CONVERSATION_EXPIRED: "对话已过期，请清空后重新开始。", TURN_IN_PROGRESS: "已有推荐正在进行，请稍后重试。",
       AI_INVALID_OUTPUT: "AI 回复未通过验证，请重试。", TURN_NOT_FOUND: "没有找到该轮推荐。",
     };

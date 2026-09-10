@@ -91,6 +91,31 @@ describe('AI turns and boundaries',()=>{
    expect(result.usage.modelRequests).toBe(2);
   } finally {s.close();}
  });
+ it('uses a no-tool final pass when the transcript fits alone but not with tool schemas',async()=>{
+  const longSummary='这是一段来自服务端的公开作品简介，用于验证多候选上下文边界。'.repeat(50).slice(0,220);
+  const longOriginalTitle='The International Candidate Original Title '.repeat(20).slice(0,240);
+  const candidates=Array.from({length:6},(_,index)=>({...media,id:String(1292268+index),title:`候选喜剧${index+1}`,originalTitle:longOriginalTitle,summary:longSummary}));
+  const d={...discovery(),
+   searchMedia:vi.fn(async(query:string)=>{const index=Math.max(0,Number(query.replace('候选喜剧',''))-1);const items=candidates.slice(index,index+2);return {query,total:items.length,items};}),
+   getMedia:vi.fn(async(_type:string,id:string)=>candidates.find(candidate=>candidate.id===id)??candidates[0]!),
+   getMediaReleases:vi.fn(async(_type:string,id:string)=>({...snapshot,itemId:id,total:0,releases:[]}))};
+  const firstToolCalls=candidates.filter((_,index)=>index%2===0).map((candidate,index)=>({id:randomUUID(),type:'function' as const,function:{name:'resolve_media',arguments:JSON.stringify({query:candidate.title,...(index===0?{preferences:{mood:'轻松'}}:{})})}}));
+  const responses:AssistantMessage[]=[
+   {role:'assistant',content:null,tool_calls:firstToolCalls},
+   {role:'assistant',content:JSON.stringify({recommendations:candidates.slice(0,3).map(candidate=>({mediaId:candidate.id,reason:'轻松的喜剧题材。'}))})}
+  ];
+  const calls:Array<{messages:AssistantMessage[];tools:unknown[]}> = [];
+  const p:CompatibleChatProvider={chat:vi.fn(async(messages,tools)=>{calls.push({messages:structuredClone(messages),tools:structuredClone(tools)});return {message:responses.shift()!,usage:{promptTokens:10,completionTokens:10,totalTokens:20}};})};
+  const result=await new AssistantService(p,d).run('o',{clientTurnId:randomUUID(),message:'轻松的喜剧电影'});
+  expect(calls).toHaveLength(2);
+  expect(calls[1]?.tools).toEqual([]);
+  const finalMessages=calls[1]?.messages??[];
+  expect(Buffer.byteLength(JSON.stringify(finalMessages),'utf8')).toBeLessThan(12_000);
+  expect(Buffer.byteLength(JSON.stringify(finalMessages)+JSON.stringify(calls[0]?.tools??[]),'utf8')).toBeGreaterThan(12_000);
+  expect(result.recommendations).toHaveLength(3);
+  expect(result.recommendations[0]?.summary).toBe(longSummary);
+  expect(result.warnings.some(w=>w.code==='AI_BUDGET_EXCEEDED'||w.code==='AI_INVALID_OUTPUT')).toBe(false);
+ });
  it('deduplicates failed PT checks within one turn',async()=>{
   const d=discovery();
   const store=new ConversationStore(),c=store.start('o',randomUUID()).turn.conversation;
@@ -202,6 +227,37 @@ describe('AI HTTP and provider failures',()=>{
   const result=await p.chat([{role:'system',content:'test instruction'},{role:'user',content:'test'}],[]);
   expect(calls[0]?.url).toBe('https://example.invalid/custom/chat/completions');
   expect(calls[0]?.body.messages[0].content).toBe('test instruction');expect(calls[0]?.body.stream).toBe(false);expect(calls[0]?.body.temperature).toBe(0.2);expect(result.usage.totalTokens).toBe(3);
+ });
+ it.each([
+  ['AI SDK', AiSdkCompatibleProvider],
+  ['fetch', FetchCompatibleProvider],
+ ])('sets reasoning_effort=none for the default Luna model through %s',async(_,Provider)=>{
+  const calls:Array<{body:any}> = [];
+ const p=new Provider({baseUrl:'https://example.invalid/v1',fetchImpl:async(url,init)=>{
+   calls.push({body:JSON.parse(String(init?.body))});
+   return Response.json({id:'fixture',created:1,model:'fixture',object:'chat.completion',choices:[{index:0,message:{role:'assistant',content:'{}'},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}});
+  }});
+  const tools=[{type:'function' as const,function:{name:'fixture',description:'fixture',parameters:{type:'object'}}}];
+  await p.chat([{role:'user',content:'test'}],tools);
+  await p.chat([{role:'user',content:'test'}],[]);
+  expect(calls.map(call=>call.body.model)).toEqual(['gpt-5.6-luna','gpt-5.6-luna']);
+  expect(calls.map(call=>call.body.reasoning_effort)).toEqual(['none','none']);
+ });
+ it.each([
+  ['AI SDK', AiSdkCompatibleProvider],
+  ['fetch', FetchCompatibleProvider],
+ ])('does not set Luna reasoning_effort for a custom model through %s',async(_,Provider)=>{
+  const calls:Array<{body:any}> = [];
+ const p=new Provider({baseUrl:'https://example.invalid/v1',model:'custom-model',fetchImpl:async(url,init)=>{
+   calls.push({body:JSON.parse(String(init?.body))});
+   return Response.json({id:'fixture',created:1,model:'custom-model',object:'chat.completion',choices:[{index:0,message:{role:'assistant',content:'{}'},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}});
+  }});
+  const tools=[{type:'function' as const,function:{name:'fixture',description:'fixture',parameters:{type:'object'}}}];
+  await p.chat([{role:'user',content:'test'}],tools);
+  await p.chat([{role:'user',content:'test'}],[]);
+  expect(calls.map(call=>call.body.model)).toEqual(['custom-model','custom-model']);
+  expect(calls[0]?.body).not.toHaveProperty('reasoning_effort');
+  expect(calls[1]?.body).not.toHaveProperty('reasoning_effort');
  });
  it('redacts provider body errors and honors rate limit without retries',async()=>{
   const fetchImpl=vi.fn(async()=>new Response('private-token',{status:429,headers:{'Retry-After':'12'}}));

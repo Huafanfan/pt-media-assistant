@@ -60,6 +60,13 @@ export type CompatibleProviderOptions = {
   fetchImpl?: FetchLike;
 };
 
+function reasoningEffortForModel(model: string): "none" | undefined {
+  // This gateway's Luna Chat Completions tool mode supports only "none".
+  // Explicit low/medium/high requires Responses; omission caused minute-long
+  // requests in live diagnostics. Keep the setting consistent on final turns.
+  return model === DEFAULT_AI_MODEL ? "none" : undefined;
+}
+
 export type ProviderErrorCode =
   | "AI_UNAVAILABLE"
   | "AI_TIMEOUT"
@@ -185,6 +192,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
   private readonly endpoint: string;
   private readonly apiKey?: string;
   private readonly model: string;
+  private readonly reasoningEffort?: "none";
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
@@ -192,6 +200,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
     this.endpoint = normalizeBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey;
     this.model = options.model?.trim() || DEFAULT_AI_MODEL;
+    this.reasoningEffort = reasoningEffortForModel(this.model);
     this.timeoutMs = Math.max(1_000, options.timeoutMs ?? DEFAULT_AI_PROVIDER_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -212,6 +221,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
       ...(tools.length ? { tools, tool_choice: "auto" } : {}),
       max_tokens: Math.min(1_200, Math.max(1, Math.floor(options.maxTokens ?? 1_200))),
       temperature: Math.min(1, Math.max(0, options.temperature ?? 0.2)),
+      ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
       stream: false,
     };
     try {
@@ -269,6 +279,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
  */
 export class AiSdkCompatibleProvider implements CompatibleChatProvider {
   private readonly model: ReturnType<ReturnType<typeof createOpenAICompatible>["chatModel"]>;
+  private readonly reasoningEffort?: "none";
   private readonly timeoutMs: number;
 
   public constructor(options: CompatibleProviderOptions) {
@@ -283,7 +294,9 @@ export class AiSdkCompatibleProvider implements CompatibleChatProvider {
       // The configured gateway must receive an explicit non-streaming request.
       transformRequestBody: (body) => ({ ...body, stream: false }),
     });
-    this.model = provider.chatModel(options.model?.trim() || DEFAULT_AI_MODEL);
+    const model = options.model?.trim() || DEFAULT_AI_MODEL;
+    this.reasoningEffort = reasoningEffortForModel(model);
+    this.model = provider.chatModel(model);
   }
 
   public async chat(
@@ -338,6 +351,7 @@ export class AiSdkCompatibleProvider implements CompatibleChatProvider {
         maxRetries: 0,
         temperature: Math.min(1, Math.max(0, options.temperature ?? 0.2)),
         maxOutputTokens: Math.min(1_200, Math.max(1, Math.floor(options.maxTokens ?? 1_200))),
+        ...(this.reasoningEffort ? { reasoning: this.reasoningEffort } : {}),
         abortSignal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs),
       });
       const toolCalls: AssistantToolCall[] = (result.toolCalls ?? []).flatMap((call) => {

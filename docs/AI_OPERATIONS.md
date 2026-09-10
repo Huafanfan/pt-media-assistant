@@ -56,6 +56,24 @@ PT_MEDIA_AI_SMOKE=1 node --import tsx scripts/ai-evaluate.ts
 
 评测支持 `PT_MEDIA_AI_EVAL_CONCURRENCY=1` 串行执行，`PT_MEDIA_AI_EVAL_CASES=轻松科幻,只要免费` 仅重测指定场景。重测是显式人工操作，不是应用的自动重试。固定数据评测不能证明真实 tracker 资源质量。
 
+## 2026-09-10 延迟诊断与兼容修复
+
+使用固定输入“轻松的搞笑电影”在服务器隔离进程中计时，未替换运行中的应用。原实现完整请求74.5秒，其中首轮模型59.2秒；只保留34个输入token、不带工具的对照仍耗时53.5秒。DNS约4ms、连接约151ms、模型目录查询约404ms，不能将这次主要延迟归因于PT或局域网。
+
+显式`low`的无工具对照约4.2秒，但带工具时网关返回400，明确要求Luna在Chat Completions工具模式使用`reasoning_effort: none`，或者迁移到Responses API。本实现保留现有Chat Completions协议，对Luna所有轮次显式发送`none`，关闭额外推理；其他自定义模型不注入此字段。需要低/中/高推理的功能应另行采用Responses，不可直接在当前工具链启用`low`。
+
+同时统一提示词为一次核实具体片名，避免把类型/情绪当片名搜索；只向模型提供240字简介，服务端保留完整详情。当消息与工具schema合计超过预算、消息本身仍在预算内时，省略工具schema完成最终回答，不再直接丢弃最终推荐步骤。
+
+修复后的隔离实测17.3秒、2次模型请求，返回3部喜剧且片源可用，无预算或格式降级。该单次结果证明链路可用，不代表延迟上限或长期成功率；仍会等待元数据与PT检查。线上状态须以实际部署记录为准。
+
+同日已按用户授权部署：镜像`sha256:54c366ee826a9fcc3fbd55150a18ab6b7072af9b0ff6010b5f3e313da275e40b`（linux/amd64），仅重建app。容器healthy、restart为unless-stopped，服务器与Mac访问页面、存活及健康接口通过，Prowlarr/qBittorrent/NAS均正常；管理HTTP/HTTPS与原监听地址保持不变。128项测试、类型检查和构建通过。备份位于`/srv/app/pt-media-assistant/backups/latency-20260910`，旧镜像标签为`pt-media-assistant:rollback-latency-20260910`。回退应用镜像可执行：
+
+```sh
+cd /srv/app/pt-media-assistant
+docker image tag pt-media-assistant:rollback-latency-20260910 pt-media-assistant:server
+docker compose --env-file .env.server --env-file .env.ai -f compose.yaml -f compose.ai.yaml up -d --no-deps --no-build --force-recreate app
+```
+
 ## 2026-09-08 试运行部署记录
 
 用户已明确授权部署并自行试用。入口：`http://192.168.1.2:4178/`，刷新后选择“AI 推荐”。

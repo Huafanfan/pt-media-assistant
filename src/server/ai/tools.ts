@@ -11,7 +11,7 @@ export type AssistantDiscovery = Pick<DiscoveryService, 'searchMedia' | 'getMedi
 export const preferencePatch = assistantPreferencesPatchSchema;
 const identity = { mediaId: z.string().regex(/^\d{1,16}$/), mediaType: z.enum(['movie','tv']) };
 const schemas = {
-  resolve_media: z.object({ query: z.string().trim().min(1).max(120), limit: z.number().int().min(1).max(5).default(3), preferences: preferencePatch.optional() }).strict(),
+  resolve_media: z.object({ query: z.string().trim().min(1).max(120).describe('一个确切的电影或剧集片名，例如夏洛特烦恼；不能填写类型、情绪或用户整句需求。'), limit: z.number().int().min(1).max(5).default(3), preferences: preferencePatch.optional() }).strict(),
   get_media_details: z.object(identity).strict(),
   check_pt_availability: z.object({ ...identity, preferences: preferencePatch.optional() }).strict(),
   rank_releases: z.object({ ...identity, preferences: preferencePatch.optional() }).strict(),
@@ -57,7 +57,7 @@ export class ToolRunner {
         const previous = this.conversation.candidates.get(key);
         this.conversation.candidates.set(key, { ...previous, media });
         this.touched.add(key);
-        items.push({mediaId:media.id,mediaType:media.mediaType,title:media.title,originalTitle:media.originalTitle,year:media.year,genres:media.genres.slice(0,20),summary:media.summary.slice(0,900),evidenceId:`metadata:${key}`});
+        items.push({mediaId:media.id,mediaType:media.mediaType,title:media.title,originalTitle:media.originalTitle,year:media.year,genres:media.genres.slice(0,20),summary:media.summary.slice(0,240),evidenceId:`metadata:${key}`});
       }
       while(this.conversation.candidates.size > 100) this.conversation.candidates.delete(this.conversation.candidates.keys().next().value!);
       return {items};
