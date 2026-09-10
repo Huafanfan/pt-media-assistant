@@ -13,6 +13,22 @@ afterEach(async () => {
 });
 
 describe("container configuration", () => {
+  it("selects the IVAN URL and key as a pair without cross-gateway fallback", () => {
+    const legacy = { TRANS_STATION_BASE_URL: 'https://legacy.example/v1', TRANS_STATION_API_KEY: 'legacy-test-key' };
+    expect(loadConfig({ ...legacy, IVAN_ONLINE_API_URL: 'https://preferred.example/v1/chat/completions', IVAN_ONLINE_API_KEY: 'preferred-test-key' }))
+      .toMatchObject({ aiBaseUrl: 'https://preferred.example/v1/chat/completions', aiApiKey: 'preferred-test-key' });
+    expect(loadConfig({ ...legacy, IVAN_ONLINE_API_URL: 'https://preferred.example/v1' }).aiApiKey).toBeUndefined();
+    expect(loadConfig({ ...legacy, IVAN_ONLINE_API_KEY: 'preferred-test-key' }).aiBaseUrl).toBeUndefined();
+    expect(loadConfig(legacy)).toMatchObject({ aiBaseUrl: legacy.TRANS_STATION_BASE_URL, aiApiKey: legacy.TRANS_STATION_API_KEY });
+  });
+
+  it("reads a mounted IVAN secret without using a legacy key", async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ivan-secret-'));
+    temporaryDirectories.push(directory);
+    const file = join(directory, 'key');
+    await writeFile(file, 'preferred-file-key\n', { mode: 0o600 });
+    expect(loadConfig({ IVAN_ONLINE_API_URL: 'https://preferred.example/v1', IVAN_ONLINE_API_KEY_FILE: file, TRANS_STATION_API_KEY: 'legacy-test-key' }).aiApiKey).toBe('preferred-file-key');
+  });
   it("reads the Prowlarr API key from a mounted secret file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pt-media-config-"));
     temporaryDirectories.push(directory);

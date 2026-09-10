@@ -21,6 +21,7 @@ import type {
   TorrentSummary
 } from "../shared/contracts";
 import {
+  assistantStreamEventSchema,
   assistantTurnResponseSchema,
   type AssistantTurnRequest,
   type AssistantTurnResponse
@@ -79,6 +80,118 @@ function normalizeAssistantTurn(payload: unknown): AssistantTurnResponse {
     throw assistantResponseError();
   }
   return parsed.data;
+}
+
+function assistantStreamResponseError(): ApiError {
+  return new ApiError("推荐流响应格式无效，请按片名搜索。", 502, "AI_INVALID_OUTPUT");
+}
+
+function responseError(response: Response, payload: unknown): ApiError {
+  const record = asRecord(payload);
+  const code = record && typeof record.code === "string" ? record.code : undefined;
+  const message = record?.error ?? record?.message;
+  return new ApiError(cleanMessage(message ?? `请求失败（${response.status}）。`), response.status, code);
+}
+
+async function requestAssistantTurnStream(
+  request: AssistantTurnRequest,
+  csrfToken: string,
+  onSnapshot: (snapshot: AssistantTurnResponse) => void,
+  signal: AbortSignal | undefined,
+  fetchImpl?: typeof fetch
+): Promise<AssistantTurnResponse> {
+  const requestFetch = fetchImpl ?? globalThis.fetch;
+  if (!requestFetch) {
+    throw new ApiError("当前环境不支持网络请求。", 0);
+  }
+
+  const response = await requestFetch("/api/assistant/turns/stream", {
+    method: "POST",
+    credentials: "same-origin",
+    ...(signal ? { signal } : {}),
+    headers: {
+      Accept: "application/x-ndjson",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken
+    },
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    const payload = parseJson(await response.text());
+    throw responseError(response, payload);
+  }
+  if (!response.body) {
+    throw assistantStreamResponseError();
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalSnapshot: AssistantTurnResponse | null = null;
+
+  const throwIfAborted = (): void => {
+    if (!signal?.aborted) return;
+    throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+  };
+
+  const consumeLine = (line: string): void => {
+    throwIfAborted();
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(trimmed) as unknown;
+    } catch {
+      throw assistantStreamResponseError();
+    }
+
+    const parsed = assistantStreamEventSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw assistantStreamResponseError();
+    }
+    if (parsed.data.type === "error") {
+      throw new ApiError(cleanMessage(parsed.data.error), 502, parsed.data.code);
+    }
+    if (parsed.data.data.clientTurnId !== request.clientTurnId
+      || (request.conversationId && parsed.data.data.conversationId !== request.conversationId)
+      || (finalSnapshot && (parsed.data.data.turnId !== finalSnapshot.turnId || parsed.data.data.conversationId !== finalSnapshot.conversationId))) {
+      throw assistantStreamResponseError();
+    }
+
+    finalSnapshot = parsed.data.data;
+    onSnapshot(parsed.data.data);
+    throwIfAborted();
+  };
+
+  try {
+    while (true) {
+      throwIfAborted();
+      const result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      if (buffer.length > 512_000) throw assistantStreamResponseError();
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).replace(/\r$/u, "");
+        buffer = buffer.slice(newlineIndex + 1);
+        consumeLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+    buffer += decoder.decode();
+    consumeLine(buffer.replace(/\r$/u, ""));
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+
+  const completedSnapshot = finalSnapshot as AssistantTurnResponse | null;
+  if (!completedSnapshot || completedSnapshot.phase !== "complete") {
+    throw assistantStreamResponseError();
+  }
+  return completedSnapshot;
 }
 
 function parseJson(text: string): unknown {
@@ -523,6 +636,12 @@ export type ApiClient = {
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
   getStorage(csrfToken: string): Promise<NasStorageSummary>;
+  createAssistantTurnStream?(
+    request: AssistantTurnRequest,
+    csrfToken: string,
+    onSnapshot: (snapshot: AssistantTurnResponse) => void,
+    signal?: AbortSignal
+  ): Promise<AssistantTurnResponse>;
   createAssistantTurn?(request: AssistantTurnRequest, csrfToken: string, signal?: AbortSignal): Promise<AssistantTurnResponse>;
   cancelAssistantTurn?(turnId: string, csrfToken: string): Promise<void>;
   clearAssistantConversation?(conversationId: string, csrfToken: string): Promise<void>;
@@ -722,6 +841,10 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
           headers: withCsrf(csrfToken)
         }, fetchImpl)
       );
+    },
+
+    async createAssistantTurnStream(request, csrfToken, onSnapshot, signal) {
+      return requestAssistantTurnStream(request, csrfToken, onSnapshot, signal, fetchImpl);
     },
 
     async createAssistantTurn(request, csrfToken, signal) {

@@ -58,12 +58,15 @@ export type CompatibleProviderOptions = {
   model?: string;
   timeoutMs?: number;
   fetchImpl?: FetchLike;
+  reasoningEffort?: "none" | "low";
 };
 
-function reasoningEffortForModel(model: string): "none" | undefined {
-  // This gateway's Luna Chat Completions tool mode supports only "none".
-  // Explicit low/medium/high requires Responses; omission caused minute-long
-  // requests in live diagnostics. Keep the setting consistent on final turns.
+type ReasoningEffort = "none" | "low";
+
+function reasoningEffortForModel(model: string, override?: ReasoningEffort): ReasoningEffort | undefined {
+  if (override) return override;
+  // User-selected minimum effort. Gateway capability restrictions must not
+  // be inferred globally from a model name or a different provider's error.
   return model === DEFAULT_AI_MODEL ? "none" : undefined;
 }
 
@@ -192,7 +195,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
   private readonly endpoint: string;
   private readonly apiKey?: string;
   private readonly model: string;
-  private readonly reasoningEffort?: "none";
+  private readonly reasoningEffort?: ReasoningEffort;
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
@@ -200,7 +203,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
     this.endpoint = normalizeBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey;
     this.model = options.model?.trim() || DEFAULT_AI_MODEL;
-    this.reasoningEffort = reasoningEffortForModel(this.model);
+    this.reasoningEffort = reasoningEffortForModel(this.model, options.reasoningEffort);
     this.timeoutMs = Math.max(1_000, options.timeoutMs ?? DEFAULT_AI_PROVIDER_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -279,7 +282,8 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
  */
 export class AiSdkCompatibleProvider implements CompatibleChatProvider {
   private readonly model: ReturnType<ReturnType<typeof createOpenAICompatible>["chatModel"]>;
-  private readonly reasoningEffort?: "none";
+  private readonly modelId: string;
+  private readonly reasoningEffort?: ReasoningEffort;
   private readonly timeoutMs: number;
 
   public constructor(options: CompatibleProviderOptions) {
@@ -295,7 +299,8 @@ export class AiSdkCompatibleProvider implements CompatibleChatProvider {
       transformRequestBody: (body) => ({ ...body, stream: false }),
     });
     const model = options.model?.trim() || DEFAULT_AI_MODEL;
-    this.reasoningEffort = reasoningEffortForModel(model);
+    this.modelId = model;
+    this.reasoningEffort = reasoningEffortForModel(model, options.reasoningEffort);
     this.model = provider.chatModel(model);
   }
 
@@ -400,12 +405,13 @@ export function providerFromConfig(config: {
   aiApiKey?: string;
   aiModel?: string;
   aiProviderTimeoutMs?: number;
-}): CompatibleChatProvider | undefined {
+}, options: { reasoningEffort?: ReasoningEffort } = {}): CompatibleChatProvider | undefined {
   if (!config.aiBaseUrl) return undefined;
   return new AiSdkCompatibleProvider({
     baseUrl: config.aiBaseUrl,
     ...(config.aiApiKey ? { apiKey: config.aiApiKey } : {}),
     ...(config.aiModel ? { model: config.aiModel } : {}),
     ...(config.aiProviderTimeoutMs ? { timeoutMs: config.aiProviderTimeoutMs } : {}),
+    ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
   });
 }

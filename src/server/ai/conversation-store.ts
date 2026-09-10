@@ -9,6 +9,9 @@ export type Conversation = {
   id: string; owner: string; touched: number; preferences: AssistantPreferences;
   candidates: Map<string, RecommendationCandidate>;
   history: Array<{ user: string; response: AssistantTurnResponse }>;
+  /** Seen public-source titles whose provider identity is not resolved yet. */
+  seenSourceTitles?: string[];
+  topic?: string;
   active?: string;
 };
 export type Turn = {

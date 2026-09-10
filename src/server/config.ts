@@ -47,6 +47,8 @@ export type AppConfig = {
   aiModel?: string;
   aiProviderTimeoutMs?: number;
   aiTurnTimeoutMs?: number;
+  aiWebEnabled?: boolean;
+  tavilyApiKey?: string;
 };
 
 function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -176,9 +178,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const aiEnabled = parseBoolean(readEnv(env, "PT_MEDIA_AI_ENABLED"));
-  const aiBaseUrl = parseAiBaseUrl(readEnv(env, "TRANS_STATION_BASE_URL"));
-  const aiApiKey = readEnv(env, "TRANS_STATION_API_KEY")
-    ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
+  // Select URL and credential as one pair. Never mix an IVAN key with a
+  // legacy gateway URL when only half of the preferred configuration exists.
+  const useIvan = Boolean(readEnv(env, "IVAN_ONLINE_API_URL") || readEnv(env, "IVAN_ONLINE_API_KEY") || readEnv(env, "IVAN_ONLINE_API_KEY_FILE"));
+  const aiBaseUrl = parseAiBaseUrl(readEnv(env, useIvan ? "IVAN_ONLINE_API_URL" : "TRANS_STATION_BASE_URL"));
+  const aiApiKey = useIvan
+    ? readEnv(env, "IVAN_ONLINE_API_KEY") ?? readSecretFile(env, "IVAN_ONLINE_API_KEY_FILE")
+    : readEnv(env, "TRANS_STATION_API_KEY") ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
   const aiModel = readEnv(env, "PT_MEDIA_AI_MODEL") ?? DEFAULT_AI_MODEL;
   const aiProviderTimeoutMs = parsePositiveInteger(
     readEnv(env, "PT_MEDIA_AI_PROVIDER_TIMEOUT_MS"),
@@ -215,6 +221,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     aiModel,
     aiProviderTimeoutMs,
     aiTurnTimeoutMs,
+    aiWebEnabled: parseBoolean(readEnv(env, "PT_MEDIA_AI_WEB_ENABLED")),
+    tavilyApiKey: readEnv(env, "TAVILY_API_KEY") ?? readSecretFile(env, "TAVILY_API_KEY_FILE"),
     ...(configuredOrigin ? { configuredOrigin: parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN") } : {}),
   };
 }

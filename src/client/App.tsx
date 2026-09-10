@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type {
   DiscoveryActor,
   DiscoveryActorWork,
@@ -159,6 +159,25 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [assistantReleaseLoading, setAssistantReleaseLoading] = useState(false);
   const [assistantReleaseError, setAssistantReleaseError] = useState<string | null>(null);
   const assistantRefreshRevision = useRef(0);
+  const assistantStreamCardRef = useRef<AssistantRecommendationCard | null>(null);
+  useEffect(() => {
+    if (!assistantSelectedCard || assistantReleaseLoading || selection || confirmLoading) return;
+    const latest = assistant.cards.find(card => card.cardId === assistantSelectedCard.cardId);
+    const priorStreamCard = assistantStreamCardRef.current;
+    if (!latest || latest === priorStreamCard) return;
+    const previous = assistantReleaseResponses[latest.cardId];
+    const followsStream = !previous || (previous.snapshotId
+      ? previous.snapshotId === priorStreamCard?.snapshotId
+      : previous.checkedAt === (priorStreamCard?.checkedAt ?? new Date(0).toISOString()));
+    assistantStreamCardRef.current = latest;
+    // An explicit refresh or an active release selection owns its snapshot.
+    // Only advance the untouched initial snapshot with background PT updates.
+    if (followsStream) {
+      setAssistantSelectedCard(latest);
+      setAssistantReleaseResponses(current => ({ ...current, [latest.cardId]: assistantCardReleases(latest) }));
+      if (latest.availability !== 'unchecked' && latest.availability !== 'error') setAssistantReleaseError(null);
+    }
+  }, [assistant.cards, assistantSelectedCard, assistantReleaseResponses, assistantReleaseLoading, selection, confirmLoading]);
   const runtime = useRuntimeStatus(client, csrfToken, paired);
   const discovery = useDiscovery(client, csrfToken, paired);
   const [selectedMediaItem, setSelectedMediaItem] = useState<DiscoveryMedia | null>(null);
@@ -272,7 +291,13 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   };
 
   const handleAssistantCard = (card: AssistantRecommendationCard) => {
-    if (confirmLoading) return;
+    if (confirmLoading || card.identityStatus === "unverified") {
+      if (card.identityStatus === "unverified") {
+        setAssistantReleaseError("这部作品的身份尚未核实，暂不能查看详情或下载。");
+      }
+      return;
+    }
+    assistantStreamCardRef.current = card;
     const existingSnapshot = assistantReleaseResponses[card.cardId];
     const snapshot = existingSnapshot ?? assistantCardReleases(card);
     assistantRefreshRevision.current += 1;
@@ -319,6 +344,10 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
   const handleSelect = async (release: ReleaseSummary, index: number) => {
     if (mediaOrigin?.kind === "assistant") {
+      if (assistantSelectedCard?.identityStatus === "unverified") {
+        setAssistantReleaseError("这部作品的身份尚未核实，暂不能查看详情或下载。");
+        return;
+      }
       const snapshot = assistantReleaseResponses[mediaOrigin.cardId];
       if (assistantReleaseResponseExpired(snapshot)) {
         setAssistantReleaseError("片源引用已过期，请刷新后重新选择。"); return;
@@ -715,7 +744,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
               <AssistantThread messages={assistant.messages} />
             </section>
             <aside className="results-pane" aria-label="推荐作品"><div className="results-scroll">
-              <AssistantRecommendations cards={assistant.cards} snapshots={assistantReleaseResponses} selectedCardId={assistantSelectedCard?.cardId ?? null} onSelect={handleAssistantCard} onFallback={() => handleModeChange("search")} error={assistant.error} errorCode={assistant.errorCode} loading={assistant.loading} />
+              <AssistantRecommendations cards={assistant.cards} pendingRecommendations={assistant.pendingRecommendations} phase={assistant.phase} snapshots={assistantReleaseResponses} selectedCardId={assistantSelectedCard?.cardId ?? null} onSelect={handleAssistantCard} onFallback={() => handleModeChange("search")} error={assistant.error} errorCode={assistant.errorCode} loading={assistant.loading} />
             </div></aside>
             {activeInspector}
             <div className="composer-dock"><QueryComposer value={query} onChange={setQuery} onSubmit={handleAssistantSubmit} loading={assistant.loading} disabled={!paired} onCancel={() => void assistant.cancel()} placeholder="例如：轻松的科幻电影，1080p，15GB 以内" inputLabel="描述想看的类型和要求" /></div>

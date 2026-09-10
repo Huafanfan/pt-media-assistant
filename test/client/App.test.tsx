@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../src/client/api";
 import { ApiError } from "../../src/client/api";
 import { App } from "../../src/client/App";
 import { formatCategories } from "../../src/client/components/ReleaseList";
+import { defaultAssistantPreferences, type AssistantTurnResponse } from "../../src/shared/assistant";
 
 const release = {
   id: "release-1",
@@ -163,6 +164,40 @@ async function searchOnce(client: ApiClient) {
 }
 
 describe("片源助手客户端", () => {
+  it.each([false, true])('updates an open recommendation inspector without replacing an explicit refresh (%s)', async (manualRefresh) => {
+    const client = makeClient();
+    let emit!: (value: AssistantTurnResponse) => void;
+    let finish!: (value: AssistantTurnResponse) => void;
+    let initial!: AssistantTurnResponse;
+    client.createAssistantTurnStream = vi.fn(async (request, _csrf, onSnapshot) => {
+      emit = onSnapshot;
+      initial = { conversationId: '11111111-1111-4111-8111-111111111111', turnId: '22222222-2222-4222-8222-222222222222', clientTurnId: request.clientTurnId,
+        text: '推荐这1部。', preferences: defaultAssistantPreferences(), warnings: [], phase: 'checking', recommendations: [{
+          cardId: 'card_live_12345678', mediaId: searchMediaItem.id, mediaType: 'movie', title: searchMediaItem.title, year: searchMediaItem.year, genres: [],
+          summary: searchMediaItem.summary, reason: '适合科幻观影。', evidenceIds: [], constraintResults: [], availability: 'unchecked', rankedReleases: [], identityStatus: 'verified',
+        }] };
+      onSnapshot(initial);
+      return new Promise<AssistantTurnResponse>(resolve => { finish = resolve; });
+    });
+    render(<App client={client} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: 'AI 推荐' }));
+    await user.type(screen.getByLabelText('描述想看的类型和要求'), '科幻电影');
+    await user.click(screen.getByRole('button', { name: '发送搜索' }));
+    await user.click(await screen.findByRole('button', { name: '查看详情' }));
+    await screen.findByText('这部作品尚未检查片源，请显式刷新后查看候选。');
+    if (manualRefresh) {
+      vi.mocked(client.refreshDiscoveryMediaReleases).mockResolvedValue({ itemId: searchMediaItem.id, query: 'manual', status: 'available', checkedAt: new Date().toISOString(), snapshotId: 'manual_snapshot_1234', total: 1, releases: [{ ...release, title: '手动刷新版本' }] });
+      await user.click(screen.getByRole('button', { name: '重新检查片源' }));
+      await screen.findByText('手动刷新版本');
+    }
+    const complete: AssistantTurnResponse = { ...initial, phase: 'complete', recommendations: [{ ...initial.recommendations[0]!, availability: 'available', checkedAt: new Date().toISOString(), snapshotId: 'stream_snapshot_1234',
+      rankedReleases: [{ ...release, resolution: '2160p', title: '后台查到的版本', rank: 1, reasonCodes: [], matchStatus: 'confirmed' }] }] };
+    await act(async () => { emit(complete); finish(complete); });
+    const candidates = await screen.findByRole('radiogroup', { name: '候选片源列表' });
+    expect(within(candidates).getByText(manualRefresh ? '手动刷新版本' : '后台查到的版本')).toBeInTheDocument();
+    expect(client.grab).not.toHaveBeenCalled();
+  });
   it("compresses nested Prowlarr categories for narrow screens", () => {
     expect(formatCategories(["Movies", "Movies/Foreign", "Movies/Other", "Movies/UHD", "Movies/BluRay", "Movies/3D"]))
       .toBe("Foreign / UHD / BluRay / 3D");

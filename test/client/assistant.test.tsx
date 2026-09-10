@@ -39,6 +39,40 @@ describe('AI recommendation UI',()=>{
   expect(details).toHaveAttribute('open');
   expect(screen.getByText('片源检查暂时不可用。')).toBeVisible();
  });
+
+ it('shows safe sources and keeps an unverified variety card out of details',()=>{
+  const select=vi.fn();
+  const unverified={...card,identityStatus:'unverified' as const,contentKind:'variety' as const,sources:[{id:'douban',title:'豆瓣条目',url:'https://movie.douban.com/subject/1292267/'}],rankedReleases:[rankedRelease]};
+  render(<AssistantRecommendations cards={[unverified]} selectedCardId={null} onSelect={select} onFallback={()=>{}} error={null} loading={false}/>);
+
+  expect(screen.getByText('综艺')).toBeInTheDocument();
+  const source=screen.getByRole('link',{name:'豆瓣条目'});
+  expect(source).toHaveAttribute('target','_blank');
+  expect(source).toHaveAttribute('rel','noreferrer noopener');
+  const details=screen.getByRole('button',{name:'待核实，暂不可查看'});
+  expect(details).toBeDisabled();
+  expect(screen.queryByText('1 个优先片源')).not.toBeInTheDocument();
+  fireEvent.click(details);
+  expect(select).not.toHaveBeenCalled();
+ });
+
+ it('keeps onlyAvailable candidates in a separate pending verification area',()=>{
+  const pending={...card,cardId:'pending_12345678',identityStatus:'unverified' as const,contentKind:'movie' as const,sources:[{id:'source',title:'来源',url:'https://example.com/movie'}]};
+  render(<AssistantRecommendations cards={[card]} pendingRecommendations={[pending]} selectedCardId={null} onSelect={()=>{}} onFallback={()=>{}} error={null} loading={true} phase="checking"/>);
+
+  expect(screen.getByRole('region',{name:'待核实推荐'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'待核实'})).toBeInTheDocument();
+  expect(screen.getByText('正在检查片源…')).toBeInTheDocument();
+  expect(screen.getByRole('link',{name:'来源'})).toHaveAttribute('href','https://example.com/movie');
+ });
+
+ it('uses the explicit series and documentary content kinds in card metadata',()=>{
+  const cards=[{...card,cardId:'series_12345678',contentKind:'series' as const},{...card,cardId:'doc_12345678',contentKind:'documentary' as const}];
+  render(<AssistantRecommendations cards={cards} selectedCardId={null} onSelect={()=>{}} onFallback={()=>{}} error={null} loading={false}/>);
+  expect(screen.getByText('剧集')).toBeInTheDocument();
+  expect(screen.getByText('纪录片')).toBeInTheDocument();
+ });
+
  it('reuses conversation and replaces the displayed recommendation set on followup',async()=>{
   const submit=vi.fn().mockResolvedValueOnce(response).mockResolvedValueOnce({...response,recommendations:[],text:'已排除看过的作品'});
   const client={createAssistantTurn:submit} as unknown as ApiClient;
@@ -72,6 +106,75 @@ describe('AI recommendation UI',()=>{
   expect(result.current.conversationId).toBeNull();
   expect(result.current.cards).toEqual([]);
   expect(result.current.messages.at(-1)?.text).toContain('对话已过期');
+ });
+
+ it('renders the first stream snapshot in the existing assistant message until completion',async()=>{
+  let resolveStream!:(value:AssistantTurnResponse)=>void;
+  const verifying={...response,phase:'verifying' as const,text:'正在核实作品…'};
+  const complete={...response,phase:'complete' as const,text:'推荐完成'};
+  const stream=vi.fn((_request:unknown,_csrf:string,onSnapshot:(snapshot:AssistantTurnResponse)=>void,_signal?:AbortSignal)=>{
+   onSnapshot(verifying);
+   return new Promise<AssistantTurnResponse>((resolve)=>{resolveStream=resolve;});
+  });
+  const legacy=vi.fn();
+  const client={createAssistantTurnStream:stream,createAssistantTurn:legacy} as unknown as ApiClient;
+  const {result}=renderHook(()=>useAssistant(client,'csrf',true));
+  let pending!:Promise<unknown>;
+  act(()=>{pending=result.current.submit('科幻');});
+  await waitFor(()=>expect(result.current.cards).toHaveLength(1));
+  expect(result.current.loading).toBe(true);
+  expect(result.current.phase).toBe('verifying');
+  expect(result.current.conversationId).toBe(response.conversationId);
+  expect(result.current.messages.filter((item)=>item.role==='assistant')).toHaveLength(1);
+  expect(legacy).not.toHaveBeenCalled();
+
+  await act(async()=>{resolveStream(complete);await pending;});
+  expect(result.current.loading).toBe(false);
+  expect(result.current.phase).toBe('complete');
+  expect(result.current.messages.filter((item)=>item.role==='assistant')).toHaveLength(1);
+  expect(result.current.messages.at(-1)?.text).toBe('推荐完成');
+ });
+
+ it('cancels a streamed check, keeps the first cards, and ignores a late snapshot',async()=>{
+  let resolveStream!:(value:AssistantTurnResponse)=>void;
+  let onSnapshot!: (snapshot:AssistantTurnResponse)=>void;
+  let signal!: AbortSignal;
+  const verifying={...response,phase:'checking' as const,text:'正在检查片源…'};
+  const late={...response,phase:'complete' as const,text:'迟到的完成结果'};
+  const stream=vi.fn((_request:unknown,_csrf:string,callback:(snapshot:AssistantTurnResponse)=>void,requestSignal?:AbortSignal)=>{
+   onSnapshot=callback;
+   signal=requestSignal!;
+   callback(verifying);
+   return new Promise<AssistantTurnResponse>((resolve)=>{resolveStream=resolve;});
+  });
+  const cancel=vi.fn().mockResolvedValue(undefined);
+  const client={createAssistantTurnStream:stream,cancelAssistantTurn:cancel} as unknown as ApiClient;
+  const {result}=renderHook(()=>useAssistant(client,'csrf',true));
+  let pending!:Promise<unknown>;
+  act(()=>{pending=result.current.submit('科幻');});
+  await waitFor(()=>expect(result.current.cards).toHaveLength(1));
+  await act(async()=>{await result.current.cancel();});
+  expect(signal.aborted).toBe(true);
+  expect(result.current.loading).toBe(false);
+  expect(result.current.cards).toHaveLength(1);
+  expect(result.current.messages.at(-1)?.text).toBe('已取消本轮推荐。');
+  onSnapshot(late);
+  resolveStream(late);
+  await pending;
+  expect(result.current.cards).toHaveLength(1);
+  expect(result.current.messages.at(-1)?.text).toBe('已取消本轮推荐。');
+  expect(cancel).toHaveBeenCalledWith(response.turnId,'csrf');
+ });
+
+ it('does not fall back to a paid JSON request when the stream method exists but fails',async()=>{
+  const stream=vi.fn().mockRejectedValue(new ApiError('流式请求失败',502,'AI_TIMEOUT'));
+  const legacy=vi.fn().mockResolvedValue(response);
+  const client={createAssistantTurnStream:stream,createAssistantTurn:legacy} as unknown as ApiClient;
+  const {result}=renderHook(()=>useAssistant(client,'csrf',true));
+  await act(async()=>{await result.current.submit('科幻');});
+  expect(stream).toHaveBeenCalledTimes(1);
+  expect(legacy).not.toHaveBeenCalled();
+  expect(result.current.error).toBe('流式请求失败');
  });
 
  it('ignores a late cancel failure after a newer turn starts',async()=>{

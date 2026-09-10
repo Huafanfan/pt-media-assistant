@@ -41,6 +41,8 @@ function responseMessage(response: AssistantTurnResponse): AssistantConversation
     text: response.text,
     createdAt: Date.now(),
     recommendations: response.recommendations,
+    ...(response.phase ? { phase: response.phase } : {}),
+    ...(response.pendingRecommendations ? { pendingRecommendations: response.pendingRecommendations } : {}),
     preferences: response.preferences,
     warnings: response.warnings
   };
@@ -50,6 +52,8 @@ export type AssistantState = {
   conversationId: string | null;
   messages: AssistantConversationMessage[];
   cards: AssistantRecommendationCard[];
+  pendingRecommendations: AssistantRecommendationCard[];
+  phase: AssistantTurnResponse["phase"];
   preferences: AssistantPreferences | null;
   loading: boolean;
   error: string | null;
@@ -86,12 +90,20 @@ export function useAssistant(
     activeAbortRef.current = null;
   }, []);
 
-  const cards = useMemo(() => [...messages].reverse().find(message => message.recommendations)?.recommendations ?? [], [messages]);
+  const latestRecommendationMessage = useMemo(
+    () => [...messages].reverse().find(message => message.role === "assistant" && message.recommendations),
+    [messages]
+  );
+  const cards = latestRecommendationMessage?.recommendations ?? [];
+  const pendingRecommendations = latestRecommendationMessage?.pendingRecommendations ?? [];
+  const phase = latestRecommendationMessage?.phase;
 
   const submit = useCallback(async (message: string): Promise<AssistantTurnResponse | null> => {
     const trimmed = message.trim();
     if (!trimmed || loading) return null;
-    if (!enabled || !csrfToken || !client.createAssistantTurn) {
+    const streamTurn = client.createAssistantTurnStream;
+    const legacyTurn = client.createAssistantTurn;
+    if (!enabled || !csrfToken || (!streamTurn && !legacyTurn)) {
       setError("AI 推荐暂时不可用，请按片名搜索。" );
       setErrorCode("AI_UNAVAILABLE");
       return null;
@@ -120,15 +132,42 @@ export function useAssistant(
       message: trimmed
     };
 
+    const applySnapshot = (snapshot: AssistantTurnResponse, streaming: boolean): void => {
+      if (requestRevision.current !== revision) return;
+      setConversationId(snapshot.conversationId);
+      conversationRef.current = snapshot.conversationId;
+      setActiveTurnId(snapshot.turnId);
+      activeTurnRef.current = snapshot.turnId;
+      setPreferences(snapshot.preferences);
+      const nextMessage = responseMessage(snapshot);
+      setMessages((current) => {
+        if (!streaming) {
+          return [...current.filter((item) => item.id !== pendingMessageId), nextMessage];
+        }
+        return current.map((item) => item.id === pendingMessageId
+          ? {
+              ...nextMessage,
+              id: pendingMessageId,
+              ...(snapshot.phase === "complete" ? {} : { status: "pending" as const })
+            }
+          : item);
+      });
+    };
+
     try {
-      const response = await client.createAssistantTurn(request, csrfToken, controller.signal);
+      const response = streamTurn
+        ? await streamTurn(
+            request,
+            csrfToken,
+            (snapshot) => applySnapshot(snapshot, true),
+            controller.signal
+          )
+        : await legacyTurn!(request, csrfToken, controller.signal);
       if (requestRevision.current !== revision) return null;
-      setConversationId(response.conversationId);
-      conversationRef.current = response.conversationId;
+      applySnapshot(response, Boolean(streamTurn));
       setActiveTurnId(null);
+      activeTurnRef.current = null;
       activeAbortRef.current = null;
-      setPreferences(response.preferences);
-      setMessages((current) => [...current.filter((item) => item.id !== pendingMessageId), responseMessage(response)]);
       return response;
     } catch (reason: unknown) {
       if (requestRevision.current !== revision) return null;
@@ -151,15 +190,20 @@ export function useAssistant(
           createdAt: Date.now()
         }]);
       } else {
-        setMessages((current) => [
-          ...current.filter((item) => item.id !== pendingMessageId),
-          {
-            id: messageId("assistant-error"),
-            role: "assistant",
-            text: failure.message,
-            createdAt: Date.now()
+        setMessages((current) => {
+          const pending = current.find((item) => item.id === pendingMessageId);
+          if (!pending) {
+            return [...current, {
+              id: messageId("assistant-error"),
+              role: "assistant",
+              text: failure.message,
+              createdAt: Date.now()
+            }];
           }
-        ]);
+          return current.map((item) => item.id === pendingMessageId
+            ? { ...item, text: failure.message, status: undefined, phase: undefined }
+            : item);
+        });
       }
       return null;
     } finally {
@@ -180,10 +224,21 @@ export function useAssistant(
     activeTurnRef.current = null;
     setLoading(false);
     setActiveTurnId(null);
-    setMessages((current) => [
-      ...current.filter((item) => item.status !== "pending"),
-      { id: messageId("assistant-cancelled"), role: "assistant", text: "已取消本轮推荐。", createdAt: Date.now(), status: "cancelled" }
-    ]);
+    setMessages((current) => {
+      const hasPending = current.some((item) => item.status === "pending");
+      if (!hasPending) {
+        return [...current, {
+          id: messageId("assistant-cancelled"),
+          role: "assistant",
+          text: "已取消本轮推荐。",
+          createdAt: Date.now(),
+          status: "cancelled" as const
+        }];
+      }
+      return current.map((item) => item.status === "pending"
+        ? { ...item, text: "已取消本轮推荐。", status: "cancelled" as const, phase: undefined }
+        : item);
+    });
     if (!turnId || !csrfToken || !client.cancelAssistantTurn) return;
     try {
       await client.cancelAssistantTurn(turnId, csrfToken);
@@ -238,6 +293,8 @@ export function useAssistant(
     conversationId,
     messages,
     cards,
+    pendingRecommendations,
+    phase,
     preferences,
     loading,
     error,

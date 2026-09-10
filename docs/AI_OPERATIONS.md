@@ -1,5 +1,13 @@
 # AI 推荐运行说明
 
+## 2026-09-10 网关纠正（优先于下方历史记录）
+
+用户指定的网关为 `IVAN_ONLINE_API_URL` 和 `IVAN_ONLINE_API_KEY`，URL 为 `https://api.ivan-online.xyz/v1/chat/completions`；模型固定 `gpt-5.6-luna`、推理 `none`。配置成对选取，不可混用旧网关地址和新密钥。也支持 `IVAN_ONLINE_API_KEY_FILE`。
+
+线上已部署联网推荐版，镜像 `sha256:e88b9216d8f8755a675ac29c91cd1375d1a0b4dd77deb7a8faf2d42ea2bed0f7`（linux/amd64），健康检查通过。使用 `compose.yaml` + `compose.ai.yaml` + `compose.ai-web.yaml`，并传入 `.env.server`、`.env.ai`。Tavily密钥由服务端0600文件提供，不进入镜像或浏览器。
+
+真实线上“做饭的综艺”首卡13.965s，完整19.509s；两部作品身份核实成功，PT未找到片源，推荐仍正常展示。174测试、类型检查和构建通过。回滚命令：`ssh root@192.168.1.2 /srv/app/pt-media-assistant/backups/ai-web-20260910/rollback.sh`。部署数据保留于现有 `/srv/data/pt-media-assistant`；仅更新app，未重启Prowlarr或qBittorrent。下方旧网关延迟或能力结论不适用于 IVAN，完整进度见 [恢复入口](AI_REDESIGN_PROGRESS.md)。
+
 此说明配套 [AI-001](features/AI_RECOMMENDATION.md)。AI 默认关闭，不改变现有发现、片名搜索和下载开关。
 
 ## 本地运行

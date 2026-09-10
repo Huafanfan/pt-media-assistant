@@ -20,6 +20,8 @@ export type AssistantConversationMessage = {
   text: string;
   createdAt: number;
   recommendations?: AssistantRecommendationCard[];
+  phase?: AssistantTurnResponse["phase"];
+  pendingRecommendations?: AssistantRecommendationCard[];
   preferences?: AssistantPreferences;
   warnings?: AssistantWarning[];
   status?: "pending" | "cancelled";

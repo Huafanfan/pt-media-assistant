@@ -1,5 +1,8 @@
-import { assistantTurnRequestSchema } from "../shared/assistant.js";
+import { assistantTurnRequestSchema, type AssistantStreamEvent } from "../shared/assistant.js";
 import { AssistantService } from "./ai/orchestrator.js";
+import { WebRecommendationService } from "./ai/web-recommendation.js";
+import { TavilySearchProvider, type WebSearchProvider } from "./ai/web-search.js";
+import { PassThrough } from "node:stream";
 import { AssistantError } from "./ai/conversation-store.js";
 import { providerFromConfig, type CompatibleChatProvider } from "./ai/provider.js";
 import type { AssistantDiscovery } from "./ai/tools.js";
@@ -71,6 +74,7 @@ export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getRelea
 };
 
 export type AppServices = {
+  webSearch?: WebSearchProvider;
   config?: AppConfig;
   aiProvider?: CompatibleChatProvider;
   pairing?: PairingService;
@@ -683,8 +687,13 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
   });
 
   const aiProvider = config.aiEnabled ? services.aiProvider ?? (config.aiApiKey ? providerFromConfig(config) : undefined) : undefined;
+  const webSearch = services.webSearch ?? (config.tavilyApiKey ? new TavilySearchProvider({ apiKey: config.tavilyApiKey }) : {
+    async search() { return { results: [], status: 'unavailable' as const, cached: false }; },
+  });
   const assistant = aiProvider && discovery.searchMedia && discovery.getMedia && discovery.getMediaDetails && discovery.getMediaReleases
-    ? new AssistantService(aiProvider, discovery as AssistantDiscovery, { timeoutMs: config.aiTurnTimeoutMs }) : undefined;
+    ? config.aiWebEnabled
+      ? new WebRecommendationService(aiProvider, discovery as AssistantDiscovery, webSearch, { timeoutMs: config.aiTurnTimeoutMs })
+      : new AssistantService(aiProvider, discovery as AssistantDiscovery, { timeoutMs: config.aiTurnTimeoutMs }) : undefined;
   app.addHook("onClose", async () => { assistant?.close(); });
   const aiFailure = (reply: FastifyReply, error: unknown) => {
     const failure = error instanceof AssistantError ? error : new AssistantError("AI_UNAVAILABLE");
@@ -717,6 +726,45 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
       return aiFailure(reply,error);
     }
     finally {request.raw.off("aborted",onClose);reply.raw.off("close",onClose);}
+  });
+  app.post("/api/assistant/turns/stream", async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    reply.header('Cache-Control', 'no-store').header('X-Accel-Buffering', 'no');
+    if (!assistant) return aiFailure(reply, new AssistantError(config.aiEnabled ? 'AI_UNAVAILABLE' : 'AI_DISABLED'));
+    const parsed = assistantTurnRequestSchema.safeParse(request.body);
+    if (!parsed.success) return sendError(reply, 400, 'Invalid request', 'INVALID_REQUEST');
+    const output = new PassThrough();
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    let firstAt: number | undefined;
+    const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    request.raw.once('aborted', onClose); reply.raw.once('close', onClose);
+    const emit = (event: AssistantStreamEvent) => {
+      if (controller.signal.aborted || output.destroyed) return;
+      output.write(`${JSON.stringify(event)}\n`);
+    };
+    void (async () => {
+      try {
+        const owner = getSessionId(request)!;
+        const result = assistant instanceof WebRecommendationService
+          ? await assistant.run(owner, parsed.data, controller.signal, data => {
+            if (firstAt === undefined && (data.recommendations.length || data.pendingRecommendations?.length)) firstAt = Date.now();
+            emit({ type: 'snapshot', data });
+          }, metric => request.log.info({ event: 'assistant_stage', ...metric }))
+          : await assistant.run(owner, parsed.data, controller.signal);
+        if (!(assistant instanceof WebRecommendationService)) emit({ type: 'snapshot', data: { ...result, phase: 'complete' } });
+        request.log.info({ event: 'assistant_turn', durationMs: Date.now() - startedAt, firstRecommendationMs: firstAt === undefined ? null : firstAt - startedAt,
+          turnId: result.turnId, usage: result.usage, recommendationCount: result.recommendations.length });
+      } catch (error) {
+        const code = error instanceof AssistantError ? error.code : 'AI_UNAVAILABLE';
+        emit({ type: 'error', code, error: code === 'AI_TIMEOUT' ? '推荐服务响应超时，已展示的内容仍可查看。' : code === 'AI_CANCELLED' ? '本轮推荐已取消。' : code === 'CONVERSATION_EXPIRED' ? '对话已过期，请清空后重新开始。' : '推荐服务暂时不可用，请稍后重试。' });
+        request.log.info({ event: 'assistant_turn_failed', durationMs: Date.now() - startedAt, code });
+      } finally {
+        request.raw.off('aborted', onClose); reply.raw.off('close', onClose);
+        output.end();
+      }
+    })();
+    return reply.type('application/x-ndjson; charset=utf-8').send(output);
   });
   app.post("/api/assistant/turns/:turnId/cancel", async(request,reply)=>{
     if(!authenticate(request,reply,sessions,config.configuredOrigin)) return;

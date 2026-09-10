@@ -1381,6 +1381,20 @@ textarea:focus-visible {
 .assistant-warning-list[open] .assistant-warning-summary::after { content:" −"; }
 .assistant-warning-items { display:grid;gap:5px;margin-top:7px;padding:7px 9px;border-left:1px solid #6e4a2c; }
 .assistant-warning-item { display:block;line-height:1.6; }
+.assistant-sources { display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:11px;line-height:1.6; }
+.assistant-sources-label { color:#8d8780;flex:0 0 auto; }
+.assistant-sources ul { display:flex;flex-wrap:wrap;gap:4px 10px;margin:0;padding:0;list-style:none; }
+.assistant-sources a { color:#d8a06f;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere; }
+.assistant-sources.is-compact { margin-top:0; }
+.assistant-pending-recommendations { margin:0 0 14px;padding:11px 12px;border:1px solid #54432f;border-radius:8px;background:#171512; }
+.assistant-pending-recommendations header { display:flex;align-items:center;justify-content:space-between;gap:8px; }
+.assistant-pending-recommendations h3 { margin:0;color:#e0b27f;font-size:12px;font-weight:600; }
+.assistant-pending-recommendations header>span { color:#a29d96;font-size:10px; }
+.assistant-pending-recommendations ul { display:grid;gap:7px;margin:9px 0 0;padding:0;list-style:none; }
+.assistant-pending-recommendations li { display:flex;align-items:flex-start;justify-content:space-between;gap:10px;color:#d0c8c0;font-size:11px; }
+.assistant-card.is-unverified { border-color:#54432f; }
+.assistant-availability.is-unverified { color:#e0b27f; }
+.assistant-open-button:disabled { cursor:not-allowed;opacity:.62; }
 @media(max-width:700px) {
  .assistant-recommendations { padding:14px; }
  .assistant-card { padding:14px; }

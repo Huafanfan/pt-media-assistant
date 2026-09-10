@@ -1,0 +1,13 @@
+# Optional overlay in addition to compose.yaml and compose.ai.yaml.
+# Keep the public-search credential out of images and browser environment.
+services:
+  app:
+    environment:
+      PT_MEDIA_AI_WEB_ENABLED: "1"
+      TAVILY_API_KEY_FILE: /run/secrets/tavily_api_key
+    secrets:
+      - source: tavily_api_key
+        target: tavily_api_key
+secrets:
+  tavily_api_key:
+    file: "${TAVILY_API_KEY_FILE:?Set the absolute path to the mode-0600 search API key file}"

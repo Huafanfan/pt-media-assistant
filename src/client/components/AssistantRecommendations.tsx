@@ -1,5 +1,5 @@
 import { CircleAlert, CircleDashed, EyeOff, RefreshCw, Search } from "lucide-react";
-import type { AssistantAvailability, AssistantRecommendationCard } from "../../shared/assistant";
+import type { AssistantAvailability, AssistantRecommendationCard, AssistantTurnResponse } from "../../shared/assistant";
 import type { DiscoveryReleaseResponse } from "../../shared/contracts";
 import { formatBytes } from "./ReleaseList";
 
@@ -11,6 +11,49 @@ function availabilityLabel(availability: AssistantAvailability): { label: string
     case "unchecked": return { label: "尚未检查", className: "is-unchecked" };
     default: return { label: "暂未找到", className: "is-unavailable" };
   }
+}
+
+function phaseLabel(phase: AssistantTurnResponse["phase"]): string {
+  switch (phase) {
+    case "verifying": return "正在核实作品…";
+    case "checking": return "正在检查片源…";
+    default: return "正在查找推荐…";
+  }
+}
+
+function contentKindLabel(card: AssistantRecommendationCard): string {
+  switch (card.contentKind) {
+    case "movie": return "电影";
+    case "series": return "剧集";
+    case "variety": return "综艺";
+    case "documentary": return "纪录片";
+    case "animation": return "动画";
+    default: return card.mediaType === "tv" ? "剧集" : "电影";
+  }
+}
+
+function safeSourceUrl(value: string): string | null {
+  return /^https?:\/\//u.test(value) ? value : null;
+}
+
+function SourceLinks({ card, compact = false }: { card: AssistantRecommendationCard; compact?: boolean }) {
+  const sources = (card.sources ?? [])
+    .map((source) => ({ ...source, url: safeSourceUrl(source.url) }))
+    .filter((source): source is typeof source & { url: string } => source.url !== null);
+  if (!sources.length) return null;
+
+  return (
+    <div className={`assistant-sources${compact ? " is-compact" : ""}`} aria-label={`${card.title} 来源`}>
+      <span className="assistant-sources-label">来源</span>
+      <ul>
+        {sources.map((source) => (
+          <li key={`${source.id}-${source.url}`}>
+            <a href={source.url} target="_blank" rel="noreferrer noopener">{source.title || "查看来源"}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function isExpired(card: AssistantRecommendationCard, snapshot?: DiscoveryReleaseResponse): boolean {
@@ -26,7 +69,9 @@ export function AssistantRecommendations({
   error,
   errorCode,
   loading,
-  snapshots = {}
+  snapshots = {},
+  phase,
+  pendingRecommendations = []
 }: {
   cards: AssistantRecommendationCard[];
   selectedCardId: string | null;
@@ -36,6 +81,8 @@ export function AssistantRecommendations({
   errorCode?: string;
   loading: boolean;
   snapshots?: Readonly<Record<string, DiscoveryReleaseResponse>>;
+  phase?: AssistantTurnResponse["phase"];
+  pendingRecommendations?: AssistantRecommendationCard[];
 }) {
   return (
     <section className="assistant-recommendations" aria-label="AI 推荐结果">
@@ -47,7 +94,7 @@ export function AssistantRecommendations({
       {loading ? (
         <div className="assistant-state" role="status" aria-live="polite">
           <CircleDashed className="spin" size={18} aria-hidden="true" />
-          <span>正在查找推荐…</span>
+          <span>{phaseLabel(phase)}</span>
         </div>
       ) : null}
 
@@ -64,12 +111,30 @@ export function AssistantRecommendations({
         </div>
       ) : null}
 
+      {pendingRecommendations.length > 0 ? (
+        <section className="assistant-pending-recommendations" aria-label="待核实推荐">
+          <header>
+            <h3>待核实</h3>
+            <span>{pendingRecommendations.length} 部</span>
+          </header>
+          <ul>
+            {pendingRecommendations.map((card) => (
+              <li key={card.cardId}>
+                <span>{card.title}</span>
+                <SourceLinks card={card} compact />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <div className="assistant-card-list">
         {cards.map((card, index) => {
           const availability = availabilityLabel(card.availability);
           const expired = isExpired(card, snapshots[card.cardId]);
+          const unverified = card.identityStatus === "unverified";
           return (
-            <article className={`assistant-card${selectedCardId === card.cardId ? " is-selected" : ""}`} key={card.cardId}>
+            <article className={`assistant-card${selectedCardId === card.cardId ? " is-selected" : ""}${unverified ? " is-unverified" : ""}`} key={card.cardId}>
               <header className="assistant-card-heading">
                 <span className="assistant-card-index">{String(index + 1).padStart(2, "0")}</span>
                 <div className="assistant-card-title">
@@ -77,14 +142,17 @@ export function AssistantRecommendations({
                   <p>
                     {card.year || "年份未知"}
                     <span aria-hidden="true"> · </span>
-                    {card.mediaType === "tv" ? "剧集" : "电影"}
+                    <span className="assistant-content-kind">{contentKindLabel(card)}</span>
                     {card.originalTitle ? <><span aria-hidden="true"> · </span>{card.originalTitle}</> : null}
                   </p>
                 </div>
-                <span className={`assistant-availability ${availability.className}`}>{expired ? "引用已过期" : availability.label}</span>
+                <span className={`assistant-availability ${unverified ? "is-unverified" : availability.className}`}>
+                  {unverified ? "待核实" : expired ? "引用已过期" : availability.label}
+                </span>
               </header>
 
               {card.reason || card.summary ? <p className="assistant-card-description">{card.reason || card.summary}</p> : null}
+              <SourceLinks card={card} />
 
               {card.constraintResults.some((constraint) => constraint.status !== "met") ? (
                 <div className="assistant-constraints" aria-label={`${card.title} 约束检查`}>
@@ -98,12 +166,18 @@ export function AssistantRecommendations({
               ) : null}
 
               <div className="assistant-card-footer">
-                <button className="outline-button assistant-open-button" type="button" onClick={() => onSelect(card)}>
-                  {expired ? <><RefreshCw size={15} aria-hidden="true" />查看并刷新</> : "查看详情"}
-                </button>
+                {unverified ? (
+                  <button className="outline-button assistant-open-button" type="button" disabled title="作品身份尚未核实">
+                    待核实，暂不可查看
+                  </button>
+                ) : (
+                  <button className="outline-button assistant-open-button" type="button" onClick={() => onSelect(card)}>
+                    {expired ? <><RefreshCw size={15} aria-hidden="true" />查看并刷新</> : "查看详情"}
+                  </button>
+                )}
               </div>
 
-              {card.rankedReleases.length > 0 ? (
+              {!unverified && card.rankedReleases.length > 0 ? (
                 <details className="assistant-release-details">
                   <summary>{card.rankedReleases.length} 个优先片源</summary>
                   <ol className="assistant-release-list" aria-label={`${card.title} 推荐片源`}>

@@ -122,6 +122,13 @@ export const assistantRankedReleaseSchema = z.object({
 }).strict();
 export type AssistantRankedRelease = z.infer<typeof assistantRankedReleaseSchema>;
 
+export const assistantSourceSchema = z.object({
+  id: z.string().min(1).max(100),
+  title: z.string().max(240),
+  url: z.string().url().max(2048).refine(value => /^https?:\/\//u.test(value)),
+}).strict();
+export const assistantContentKindSchema = z.enum(['movie', 'series', 'variety', 'documentary', 'animation', 'unknown']);
+
 export const assistantRecommendationCardSchema = z.object({
   cardId: z.string().regex(/^[A-Za-z0-9_-]{8,160}$/u),
   mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
@@ -140,6 +147,9 @@ export const assistantRecommendationCardSchema = z.object({
   expiresAt: z.string().datetime().optional(),
   actionableUntil: z.string().datetime().optional(),
   rankedReleases: z.array(assistantRankedReleaseSchema).max(3),
+  identityStatus: z.enum(['verified', 'unverified']).optional(),
+  sources: z.array(assistantSourceSchema).max(6).optional(),
+  contentKind: assistantContentKindSchema.optional(),
 }).strict();
 export type AssistantRecommendationCard = z.infer<typeof assistantRecommendationCardSchema>;
 
@@ -168,8 +178,16 @@ export const assistantTurnResponseSchema = z.object({
   recommendations: z.array(assistantRecommendationCardSchema).max(5),
   warnings: z.array(assistantWarningSchema).max(20),
   usage: assistantUsageSchema.optional(),
+  phase: z.enum(['verifying', 'checking', 'complete']).optional(),
+  pendingRecommendations: z.array(assistantRecommendationCardSchema).max(5).optional(),
 }).strict();
 export type AssistantTurnResponse = z.infer<typeof assistantTurnResponseSchema>;
+
+export const assistantStreamEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('snapshot'), data: assistantTurnResponseSchema }).strict(),
+  z.object({ type: z.literal('error'), error: z.string().max(300), code: z.string().max(64) }).strict(),
+]);
+export type AssistantStreamEvent = z.infer<typeof assistantStreamEventSchema>;
 
 export const assistantErrorCodeSchema = z.enum([
   "AI_DISABLED",
