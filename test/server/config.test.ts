@@ -13,6 +13,30 @@ afterEach(async () => {
 });
 
 describe("container configuration", () => {
+  it("selects the DeepSeek URL and token as a pair before either legacy gateway", () => {
+    const legacy = {
+      TRANS_STATION_BASE_URL: "https://legacy.example/v1",
+      TRANS_STATION_API_KEY: "legacy-test-key",
+      IVAN_ONLINE_API_URL: "https://ivan.example/v1",
+      IVAN_ONLINE_API_KEY: "ivan-test-key",
+    };
+    expect(loadConfig({
+      ...legacy,
+      DS_BASE_URL: "https://api.deepseek.example/v1",
+      DS_AUTH_TOKEN: "deepseek-test-token",
+    })).toMatchObject({
+      aiBaseUrl: "https://api.deepseek.example/v1",
+      aiApiKey: "deepseek-test-token",
+      aiModel: "deepseek-flash",
+    });
+    const missingToken = loadConfig({ ...legacy, DS_BASE_URL: "https://api.deepseek.example/v1" });
+    expect(missingToken.aiBaseUrl).toBe("https://api.deepseek.example/v1");
+    expect(missingToken.aiApiKey).toBeUndefined();
+    const missingUrl = loadConfig({ ...legacy, DS_AUTH_TOKEN: "deepseek-test-token" });
+    expect(missingUrl.aiBaseUrl).toBeUndefined();
+    expect(missingUrl.aiApiKey).toBe("deepseek-test-token");
+  });
+
   it("selects the IVAN URL and key as a pair without cross-gateway fallback", () => {
     const legacy = { TRANS_STATION_BASE_URL: 'https://legacy.example/v1', TRANS_STATION_API_KEY: 'legacy-test-key' };
     expect(loadConfig({ ...legacy, IVAN_ONLINE_API_URL: 'https://preferred.example/v1/chat/completions', IVAN_ONLINE_API_KEY: 'preferred-test-key' }))
@@ -28,6 +52,19 @@ describe("container configuration", () => {
     const file = join(directory, 'key');
     await writeFile(file, 'preferred-file-key\n', { mode: 0o600 });
     expect(loadConfig({ IVAN_ONLINE_API_URL: 'https://preferred.example/v1', IVAN_ONLINE_API_KEY_FILE: file, TRANS_STATION_API_KEY: 'legacy-test-key' }).aiApiKey).toBe('preferred-file-key');
+  });
+
+  it("reads a mounted DeepSeek token without using either legacy key", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "deepseek-secret-"));
+    temporaryDirectories.push(directory);
+    const file = join(directory, "token");
+    await writeFile(file, "deepseek-file-token\n", { mode: 0o600 });
+    expect(loadConfig({
+      DS_BASE_URL: "https://api.deepseek.example/v1",
+      DS_AUTH_TOKEN_FILE: file,
+      IVAN_ONLINE_API_KEY: "ivan-test-key",
+      TRANS_STATION_API_KEY: "legacy-test-key",
+    }).aiApiKey).toBe("deepseek-file-token");
   });
   it("reads the Prowlarr API key from a mounted secret file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pt-media-config-"));

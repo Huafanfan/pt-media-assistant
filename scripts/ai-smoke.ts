@@ -1,5 +1,5 @@
 /** Explicit paid smoke: PT_MEDIA_AI_SMOKE=1 node --import tsx scripts/ai-smoke.ts.
- * Uses real Luna and synthetic metadata/releases only. Never reaches PT/grab.
+ * Uses the configured model and synthetic metadata/releases only. Never reaches PT/grab.
  */
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '../src/server/config.js';

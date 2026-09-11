@@ -1,4 +1,9 @@
-import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER_TIMEOUT_MS } from "../config.js";
+import {
+  DEFAULT_AI_MODEL,
+  DEFAULT_AI_PROVIDER_TIMEOUT_MS,
+  DEEPSEEK_MODEL,
+  LEGACY_LUNA_MODEL,
+} from "../config.js";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText, isStepCount, jsonSchema } from "ai";
 
@@ -62,12 +67,32 @@ export type CompatibleProviderOptions = {
 };
 
 type ReasoningEffort = "none" | "low";
+type DeepSeekThinking = "disabled";
+
+function isDeepSeekModel(model: string): boolean {
+  return model === DEEPSEEK_MODEL || model.startsWith("deepseek-");
+}
+
+function assertModelReasoningCompatibility(model: string, override?: ReasoningEffort): void {
+  if (isDeepSeekModel(model) && override === "low") {
+    throw new Error("DeepSeek provider only supports non-thinking requests");
+  }
+}
 
 function reasoningEffortForModel(model: string, override?: ReasoningEffort): ReasoningEffort | undefined {
+  if (isDeepSeekModel(model)) return undefined;
   if (override) return override;
   // User-selected minimum effort. Gateway capability restrictions must not
   // be inferred globally from a model name or a different provider's error.
-  return model === DEFAULT_AI_MODEL ? "none" : undefined;
+  return model === LEGACY_LUNA_MODEL ? "none" : undefined;
+}
+
+function thinkingForModel(model: string): DeepSeekThinking | undefined {
+  if (!isDeepSeekModel(model)) return undefined;
+  // DeepSeek enables thinking by default. The assistant's normal bounded
+  // turns explicitly disable it; thinking sessions are outside this adapter's
+  // bounded Chat Completions contract.
+  return "disabled";
 }
 
 export type ProviderErrorCode =
@@ -186,7 +211,7 @@ function coerceMessage(value: unknown): AssistantMessage {
 
 /**
  * Minimal OpenAI-compatible adapter. It intentionally uses fetch instead of
- * importing an SDK so the configured TRANS_STATION endpoint remains the only
+ * importing an SDK so the configured compatible endpoint remains the only
  * network boundary and no provider-specific dependency is required at build
  * time. The request shape is compatible with AI SDK's OpenAI-compatible
  * provider and can be replaced behind this interface later.
@@ -196,6 +221,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
   private readonly apiKey?: string;
   private readonly model: string;
   private readonly reasoningEffort?: ReasoningEffort;
+  private readonly thinking?: DeepSeekThinking;
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
@@ -203,7 +229,9 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
     this.endpoint = normalizeBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey;
     this.model = options.model?.trim() || DEFAULT_AI_MODEL;
+    assertModelReasoningCompatibility(this.model, options.reasoningEffort);
     this.reasoningEffort = reasoningEffortForModel(this.model, options.reasoningEffort);
+    this.thinking = thinkingForModel(this.model);
     this.timeoutMs = Math.max(1_000, options.timeoutMs ?? DEFAULT_AI_PROVIDER_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -225,6 +253,7 @@ export class FetchCompatibleProvider implements CompatibleChatProvider {
       max_tokens: Math.min(1_200, Math.max(1, Math.floor(options.maxTokens ?? 1_200))),
       temperature: Math.min(1, Math.max(0, options.temperature ?? 0.2)),
       ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
+      ...(this.thinking ? { thinking: { type: this.thinking } } : {}),
       stream: false,
     };
     try {
@@ -288,19 +317,26 @@ export class AiSdkCompatibleProvider implements CompatibleChatProvider {
 
   public constructor(options: CompatibleProviderOptions) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AI_PROVIDER_TIMEOUT_MS;
+    const model = options.model?.trim() || DEFAULT_AI_MODEL;
+    assertModelReasoningCompatibility(model, options.reasoningEffort);
+    const reasoningEffort = reasoningEffortForModel(model, options.reasoningEffort);
+    const thinking = thinkingForModel(model);
+    this.modelId = model;
+    this.reasoningEffort = reasoningEffort;
     const provider = createOpenAICompatible({
       baseURL: normalizeSdkBaseUrl(options.baseUrl),
-      name: "trans-station",
+      name: "compatible-gateway",
       ...(options.apiKey ? { apiKey: options.apiKey } : {}),
       ...(options.fetchImpl ? { fetch: options.fetchImpl as never } : {}),
       includeUsage: true,
       supportsStructuredOutputs: false,
       // The configured gateway must receive an explicit non-streaming request.
-      transformRequestBody: (body) => ({ ...body, stream: false }),
+      transformRequestBody: (body) => ({
+        ...body,
+        stream: false,
+        ...(thinking ? { thinking: { type: thinking } } : {}),
+      }),
     });
-    const model = options.model?.trim() || DEFAULT_AI_MODEL;
-    this.modelId = model;
-    this.reasoningEffort = reasoningEffortForModel(model, options.reasoningEffort);
     this.model = provider.chatModel(model);
   }
 

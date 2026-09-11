@@ -1,7 +1,7 @@
 /** Explicit, bounded live evaluation. PT is always stubbed; this does not prove resource availability. */
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { loadConfig } from '../src/server/config.js';
+import { DEEPSEEK_MODEL, LEGACY_LUNA_MODEL, loadConfig } from '../src/server/config.js';
 import { providerFromConfig } from '../src/server/ai/provider.js';
 import { WebRecommendationService } from '../src/server/ai/web-recommendation.js';
 import { TavilySearchProvider } from '../src/server/ai/web-search.js';
@@ -14,9 +14,9 @@ const ids = process.env.PT_MEDIA_EVAL_CASES?.split(',').filter(Boolean) ?? [];
 if (!ids.length || ids.length > 3 || ids.some(id => !cases.some(c => c.id === id))) throw new Error('Select 1–3 explicit PT_MEDIA_EVAL_CASES IDs; no default paid sweep');
 const config = loadConfig();
 if (!config.aiApiKey || !config.aiBaseUrl || !config.tavilyApiKey) throw new Error('Model and search credentials are required');
-if (config.aiModel !== 'gpt-5.6-luna') throw new Error('This evaluation is restricted to the user-selected gpt-5.6-luna');
-const reasoning = 'none' as const;
-const provider = providerFromConfig(config, { reasoningEffort: reasoning })!;
+if (config.aiModel !== DEEPSEEK_MODEL && config.aiModel !== LEGACY_LUNA_MODEL) throw new Error(`This evaluation is restricted to ${DEEPSEEK_MODEL} or explicitly selected ${LEGACY_LUNA_MODEL}`);
+const reasoning = config.aiModel === LEGACY_LUNA_MODEL ? 'none' as const : undefined;
+const provider = providerFromConfig(config, reasoning ? { reasoningEffort: reasoning } : {})!;
 const search = new TavilySearchProvider({ apiKey: config.tavilyApiKey });
 const douban = new DoubanClient();
 for (const c of cases.filter(c => ids.includes(c.id))) {

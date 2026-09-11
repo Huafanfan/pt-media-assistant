@@ -4,18 +4,14 @@ services:
   app:
     environment:
       PT_MEDIA_AI_ENABLED: "1"
-      PT_MEDIA_AI_MODEL: "${PT_MEDIA_AI_MODEL:-gpt-5.6-luna}"
+      PT_MEDIA_AI_MODEL: "${PT_MEDIA_AI_MODEL:-deepseek-flash}"
       PT_MEDIA_AI_PROVIDER_TIMEOUT_MS: "${PT_MEDIA_AI_PROVIDER_TIMEOUT_MS:-30000}"
       PT_MEDIA_AI_TURN_TIMEOUT_MS: "${PT_MEDIA_AI_TURN_TIMEOUT_MS:-60000}"
-      IVAN_ONLINE_API_URL: "${IVAN_ONLINE_API_URL:?Set the fixed HTTPS IVAN model API URL}"
-      IVAN_ONLINE_API_KEY_FILE: /run/secrets/ivan_online_api_key
-      # Compatibility aliases let the previous application image use the
-      # same correctly paired gateway during a staged rollout or rollback.
-      TRANS_STATION_BASE_URL: "${IVAN_ONLINE_API_URL:?Set the fixed HTTPS IVAN model API URL}"
-      TRANS_STATION_API_KEY_FILE: /run/secrets/ivan_online_api_key
+      DS_BASE_URL: "${DS_BASE_URL:?Set the HTTPS DeepSeek OpenAI-compatible API URL}"
+      DS_AUTH_TOKEN_FILE: /run/secrets/deepseek_api_key
     secrets:
-      - source: ivan_online_api_key
-        target: ivan_online_api_key
+      - source: deepseek_api_key
+        target: deepseek_api_key
 secrets:
-  ivan_online_api_key:
-    file: "${IVAN_ONLINE_API_KEY_FILE:?Set the path to the mode-0600 IVAN model API key file}"
+  deepseek_api_key:
+    file: "${DS_AUTH_TOKEN_FILE:?Set the path to the mode-0600 DeepSeek API key file}"

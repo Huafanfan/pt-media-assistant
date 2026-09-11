@@ -1,5 +1,21 @@
 # AI 推荐运行说明
 
+## 2026-09-12 DeepSeek 切换（当前配置）
+
+默认模型为 `deepseek-flash`，对应 2026-09-10 发布的 DeepSeek-V4.1-Flash。
+依据：[官方更新记录](https://api-docs.deepseek.com/updates/)、[接入文档](https://api-docs.deepseek.com/)、[思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
+Chat Completions 显式使用 `thinking: { type: "disabled" }`，保持快速推荐与现有有界工具循环；不使用 Luna 的 `reasoning_effort: none` 来关闭 DeepSeek 思考。
+
+本地配置 `DS_BASE_URL=https://api.deepseek.com` 与 `DS_AUTH_TOKEN`，或通过 `DS_AUTH_TOKEN_FILE` 读取密钥。DS 配置整对优先于历史 IVAN/TRANS 配置，缺失一半时不借用其他供应商密钥。AI 仍须显式启用 `PT_MEDIA_AI_ENABLED=1`。
+
+服务器 `.env.ai` 配置 `DS_BASE_URL`、`DS_AUTH_TOKEN_FILE` 与 `PT_MEDIA_AI_MODEL=deepseek-flash`，密钥文件保持 0600，通过 Compose secret 挂载。部署命令：
+
+```sh
+docker compose --env-file .env.server --env-file .env.ai -f compose.yaml -f compose.ai.yaml -f compose.ai-web.yaml up -d --no-deps --no-build --force-recreate app
+```
+
+回滚必须同时恢复备份的 `.env.ai`、`compose.ai.yaml`、`.env.server` 和旧应用镜像，再执行上述命令。旧供应商密钥与数据保留。下方 Luna 记录为历史证据。
+
 ## 2026-09-10 网关纠正（优先于下方历史记录）
 
 用户指定的网关为 `IVAN_ONLINE_API_URL` 和 `IVAN_ONLINE_API_KEY`，URL 为 `https://api.ivan-online.xyz/v1/chat/completions`；模型固定 `gpt-5.6-luna`、推理 `none`。配置成对选取，不可混用旧网关地址和新密钥。也支持 `IVAN_ONLINE_API_KEY_FILE`。

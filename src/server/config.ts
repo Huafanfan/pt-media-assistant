@@ -15,7 +15,9 @@ export const DEFAULT_SESSION_COOKIE = "pt_media_session";
 export const DEFAULT_NAS_SENTINEL_NAME = ".pt-media-assistant-mounted";
 export const RELEASE_CACHE_TTL_MS = 15 * 60 * 1000;
 export const UPSTREAM_TIMEOUT_MS = 65 * 1000;
-export const DEFAULT_AI_MODEL = "gpt-5.6-luna";
+export const DEFAULT_AI_MODEL = "deepseek-flash";
+export const LEGACY_LUNA_MODEL = "gpt-5.6-luna";
+export const DEEPSEEK_MODEL = "deepseek-flash";
 export const DEFAULT_AI_PROVIDER_TIMEOUT_MS = 30 * 1000;
 export const DEFAULT_AI_TURN_TIMEOUT_MS = 60 * 1000;
 
@@ -178,13 +180,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const aiEnabled = parseBoolean(readEnv(env, "PT_MEDIA_AI_ENABLED"));
-  // Select URL and credential as one pair. Never mix an IVAN key with a
-  // legacy gateway URL when only half of the preferred configuration exists.
-  const useIvan = Boolean(readEnv(env, "IVAN_ONLINE_API_URL") || readEnv(env, "IVAN_ONLINE_API_KEY") || readEnv(env, "IVAN_ONLINE_API_KEY_FILE"));
-  const aiBaseUrl = parseAiBaseUrl(readEnv(env, useIvan ? "IVAN_ONLINE_API_URL" : "TRANS_STATION_BASE_URL"));
-  const aiApiKey = useIvan
-    ? readEnv(env, "IVAN_ONLINE_API_KEY") ?? readSecretFile(env, "IVAN_ONLINE_API_KEY_FILE")
-    : readEnv(env, "TRANS_STATION_API_KEY") ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
+  // Select URL and credential as one pair. DeepSeek takes precedence over
+  // the previous gateways, but a partial DeepSeek configuration must not
+  // borrow a URL or key from either of them.
+  const useDeepSeek = Boolean(readEnv(env, "DS_BASE_URL") || readEnv(env, "DS_AUTH_TOKEN") || readEnv(env, "DS_AUTH_TOKEN_FILE"));
+  const useIvan = !useDeepSeek && Boolean(readEnv(env, "IVAN_ONLINE_API_URL") || readEnv(env, "IVAN_ONLINE_API_KEY") || readEnv(env, "IVAN_ONLINE_API_KEY_FILE"));
+  const aiBaseUrl = parseAiBaseUrl(readEnv(env, useDeepSeek ? "DS_BASE_URL" : useIvan ? "IVAN_ONLINE_API_URL" : "TRANS_STATION_BASE_URL"));
+  const aiApiKey = useDeepSeek
+    ? readEnv(env, "DS_AUTH_TOKEN") ?? readSecretFile(env, "DS_AUTH_TOKEN_FILE")
+    : useIvan
+      ? readEnv(env, "IVAN_ONLINE_API_KEY") ?? readSecretFile(env, "IVAN_ONLINE_API_KEY_FILE")
+      : readEnv(env, "TRANS_STATION_API_KEY") ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
   const aiModel = readEnv(env, "PT_MEDIA_AI_MODEL") ?? DEFAULT_AI_MODEL;
   const aiProviderTimeoutMs = parsePositiveInteger(
     readEnv(env, "PT_MEDIA_AI_PROVIDER_TIMEOUT_MS"),

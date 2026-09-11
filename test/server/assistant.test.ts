@@ -220,7 +220,7 @@ describe('AI HTTP and provider failures',()=>{
  });
  it('encodes system instructions through AI SDK and preserves the exact gateway base path',async()=>{
   const calls:Array<{url:string,body:any}>=[];
-  const p=new AiSdkCompatibleProvider({baseUrl:'https://example.invalid/custom',apiKey:'fixture',fetchImpl:async(url,init)=>{
+  const p=new AiSdkCompatibleProvider({baseUrl:'https://example.invalid/custom',apiKey:'fixture',model:'gpt-5.6-luna',fetchImpl:async(url,init)=>{
     calls.push({url:String(url),body:JSON.parse(String(init?.body))});
     return Response.json({id:'fixture',created:1,model:'fixture',object:'chat.completion',choices:[{index:0,message:{role:'assistant',content:'{}'},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}});
   }});
@@ -233,7 +233,7 @@ describe('AI HTTP and provider failures',()=>{
   ['fetch', FetchCompatibleProvider],
  ])('sets reasoning_effort=none for the default Luna model through %s',async(_,Provider)=>{
   const calls:Array<{body:any}> = [];
- const p=new Provider({baseUrl:'https://example.invalid/v1',fetchImpl:async(url,init)=>{
+ const p=new Provider({baseUrl:'https://example.invalid/v1',model:'gpt-5.6-luna',fetchImpl:async(url,init)=>{
    calls.push({body:JSON.parse(String(init?.body))});
    return Response.json({id:'fixture',created:1,model:'fixture',object:'chat.completion',choices:[{index:0,message:{role:'assistant',content:'{}'},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}});
   }});

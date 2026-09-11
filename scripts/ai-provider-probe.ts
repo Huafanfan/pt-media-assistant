@@ -5,13 +5,14 @@ const config = loadConfig();
 if (!config.aiBaseUrl || !config.aiApiKey) throw new Error('Model configuration required');
 const base = config.aiBaseUrl.replace(/\/chat\/completions\/?$/u, '').replace(/\/$/u, '');
 const mode = process.env.PT_MEDIA_PROVIDER_PROBE_MODE ?? 'catalog';
+const isDeepSeek = config.aiModel?.startsWith('deepseek-') ?? false;
 if (!['catalog', 'stream'].includes(mode)) throw new Error('Mode must be catalog or stream');
 const start = Date.now();
 try {
   const response = await fetch(`${base}/${mode === 'catalog' ? 'models' : 'chat/completions'}`, {
     method: mode === 'catalog' ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${config.aiApiKey}`, 'Content-Type': 'application/json' },
-    ...(mode === 'stream' ? { body: JSON.stringify({ model: config.aiModel, stream: true, ...(config.aiModel === 'gpt-5.6-luna' ? { reasoning_effort: 'none' } : {}), max_tokens: 120, messages: [{ role: 'user', content: '推荐两部轻松的喜剧电影，每部只写片名和一句话。' }] }) } : {}),
+    ...(mode === 'stream' ? { body: JSON.stringify({ model: config.aiModel, stream: true, ...(isDeepSeek ? { thinking: { type: 'disabled' } } : config.aiModel === 'gpt-5.6-luna' ? { reasoning_effort: 'none' } : {}), max_tokens: 120, messages: [{ role: 'user', content: '推荐两部轻松的喜剧电影，每部只写片名和一句话。' }] }) } : {}),
     signal: AbortSignal.timeout(25000),
   });
   const headersMs = Date.now() - start;
@@ -20,7 +21,7 @@ try {
     const json = await response.json() as { data?: Array<{ id?: string }> };
     const names = json.data?.map(x => x.id).filter((x): x is string => Boolean(x)) ?? [];
     console.log(JSON.stringify({ mode, status: response.status, durationMs: Date.now() - start, total: names.length,
-      candidates: names.filter(x => x === 'gpt-5.6-luna') }));
+      candidates: names.filter(x => x === 'deepseek-flash' || x === 'gpt-5.6-luna') }));
   } else {
     const reader = response.body!.getReader(); const decoder = new TextDecoder();
     let firstTextMs: number | undefined, buffer = '', characters = 0, events = 0;
