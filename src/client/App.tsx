@@ -7,7 +7,8 @@ import type {
   DiscoveryMedia,
   DiscoveryReleaseResponse,
   GrabResponse,
-  ReleaseSummary
+  ReleaseSummary,
+  SearchResponse
 } from "../shared/contracts";
 import type { AssistantRecommendationCard } from "../shared/assistant";
 import { ApiError, apiClient, type ApiClient } from "./api";
@@ -23,8 +24,9 @@ import { MediaSearchResults } from "./components/MediaSearchResults";
 import { ModeSwitch, type AppMode } from "./components/ModeSwitch";
 import { PairingGate } from "./components/PairingGate";
 import { QueryComposer } from "./components/QueryComposer";
+import { ReleaseList, formatBytes } from "./components/ReleaseList";
 import { RuntimeStatusBar } from "./components/RuntimeSummary";
-import { LoadingState, OfflineState } from "./components/States";
+import { EmptyState, LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
 import { useDiscovery } from "./hooks/useDiscovery";
@@ -147,6 +149,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [mediaSearchItems, setMediaSearchItems] = useState<DiscoveryMedia[]>([]);
   const [mediaSearchLoading, setMediaSearchLoading] = useState(false);
   const [mediaSearchError, setMediaSearchError] = useState<string | null>(null);
+  const [searchSubMode, setSearchSubMode] = useState<"media" | "release">("media");
+  const [releaseResults, setReleaseResults] = useState<SearchResponse | null>(null);
+  const [releaseSearchError, setReleaseSearchError] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -247,10 +252,13 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
       return;
     }
 
+    const releaseMode = searchSubMode === "release";
     setSearchState("loading");
     setMediaSearchItems([]);
     setMediaSearchError(null);
-    setMediaSearchLoading(true);
+    setReleaseResults(null);
+    setReleaseSearchError(null);
+    setMediaSearchLoading(!releaseMode);
     setSelection(null);
     setSelectionError(null);
     setInspectorExpanded(false);
@@ -267,27 +275,60 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     ]);
 
     try {
-      const response = await client.searchDiscoveryMedia(nextQuery, csrfToken, 10);
-      setMediaSearchItems(response.items);
-      setMediaSearchError(null);
-      setMediaSearchLoading(false);
-      setMessages((current) => [
-        ...current,
-        { id: messageId(), role: "assistant", text: initialAssistantMessage(response.total), createdAt: Date.now() }
-      ]);
+      if (releaseMode) {
+        // Direct release search stays an explicit fallback: it never replaces
+        // the media-first default and still ends in the same preview and
+        // explicit confirmation boundary before anything reaches qBittorrent.
+        const response = await client.search({ query: nextQuery, limit: 20 }, csrfToken);
+        setReleaseResults(response);
+        setMessages((current) => [
+          ...current,
+          { id: messageId(), role: "assistant", text: `找到 ${response.total} 个片源，选择后仍需确认才会加入下载。`, createdAt: Date.now() }
+        ]);
+      } else {
+        const response = await client.searchDiscoveryMedia(nextQuery, csrfToken, 10);
+        setMediaSearchItems(response.items);
+        setMessages((current) => [
+          ...current,
+          { id: messageId(), role: "assistant", text: initialAssistantMessage(response.total), createdAt: Date.now() }
+        ]);
+      }
       setQuery("");
       setSearchState("success");
     } catch (error) {
-      setMediaSearchLoading(false);
       const message = readableError(error);
-      setMediaSearchItems([]);
-      setMediaSearchError(message);
+      if (releaseMode) {
+        setReleaseResults(null);
+        setReleaseSearchError(message);
+      } else {
+        setMediaSearchItems([]);
+        setMediaSearchError(message);
+      }
       setSearchState("error");
       setMessages((current) => [
         ...current,
-        { id: messageId(), role: "assistant", text: "这次搜索没有完成，请检查服务状态后重试。", createdAt: Date.now() }
+        { id: messageId(), role: "assistant", text: releaseMode ? "这次片源查询没有完成，请稍后重试或改用作品搜索。" : "这次搜索没有完成，请检查服务状态后重试。", createdAt: Date.now() }
       ]);
+    } finally {
+      setMediaSearchLoading(false);
     }
+  };
+
+  const handleSearchSubModeChange = (nextSubMode: "media" | "release") => {
+    if (nextSubMode === searchSubMode || searchState === "loading") return;
+    setSearchSubMode(nextSubMode);
+    setMediaSearchItems([]);
+    setMediaSearchError(null);
+    setReleaseResults(null);
+    setReleaseSearchError(null);
+    setSearchState("idle");
+    resetReleaseSelection();
+    setSelectedMediaItem(null);
+    setMediaOrigin(null);
+    setSelectedActorName(null);
+    setActorHistory([]);
+    setDiscoveryInspectorError(null);
+    setDiscoveryDetailsError(null);
   };
 
   const handleAssistantCard = (card: AssistantRecommendationCard) => {
@@ -754,21 +795,71 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
             <section className="chat-pane" aria-label="作品搜索对话">
               <div className="search-mode-toolbar">
                 <ModeSwitch mode={mode} onChange={handleModeChange} />
+                <div className="search-submode" role="tablist" aria-label="搜索方式">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={searchSubMode === "media"}
+                    className={searchSubMode === "media" ? "is-active" : undefined}
+                    onClick={() => handleSearchSubModeChange("media")}
+                  >
+                    作品
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={searchSubMode === "release"}
+                    className={searchSubMode === "release" ? "is-active" : undefined}
+                    onClick={() => handleSearchSubModeChange("release")}
+                  >
+                    片源直搜
+                  </button>
+                </div>
               </div>
               <ChatThread messages={messages} />
               {healthError ? <p className="workspace-warning" role="status">{healthError}</p> : null}
             </section>
 
-            <aside className="results-pane" aria-label="作品搜索结果">
+            <aside className="results-pane" aria-label={searchSubMode === "release" ? "片源直搜结果" : "作品搜索结果"}>
               <div className="results-scroll">
-                <MediaSearchResults
-                  items={mediaSearchItems}
-                  loading={mediaSearchLoading}
-                  error={mediaSearchError}
-                  searched={searchState !== "idle"}
-                  selectedItemId={mediaOrigin?.kind === "search" ? selectedMediaItem?.id ?? null : null}
-                  onSelect={(item) => handleMediaItem(item, { kind: "search", query: item.title })}
-                />
+                {searchSubMode === "release" ? (
+                  <>
+                    {releaseResults ? (
+                      <div className="release-search-intent" aria-label="解析后的搜索条件">
+                        <span>关键词 {releaseResults.intent.searchTerm}</span>
+                        {releaseResults.intent.resolution ? <span>{releaseResults.intent.resolution}</span> : null}
+                        {releaseResults.intent.maxSizeBytes ? <span>≤ {formatBytes(releaseResults.intent.maxSizeBytes)}</span> : null}
+                        {releaseResults.intent.freeleechOnly ? <span>仅免费</span> : null}
+                        <span className="release-search-elapsed">{releaseResults.elapsedMs} ms</span>
+                      </div>
+                    ) : null}
+                    {searchState === "loading" ? <LoadingState label="正在查询片源…" /> : null}
+                    {releaseSearchError ? <p className="inline-error" role="alert">{releaseSearchError}</p> : null}
+                    {releaseResults ? (
+                      <ReleaseList
+                        releases={releaseResults.releases}
+                        total={releaseResults.total}
+                        selectedId={selection?.release.id ?? null}
+                        selectingId={selectingId}
+                        onSelect={(release, index) => void handleSelect(release, index)}
+                      />
+                    ) : searchState !== "loading" && !releaseSearchError ? (
+                      <EmptyState
+                        title="片源直搜"
+                        detail="直接查询已配置的 PT 索引器；支持片名、分辨率（如 1080p）和体积（如 10GB 以内）。选择片源后仍需要预检和确认。"
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <MediaSearchResults
+                    items={mediaSearchItems}
+                    loading={mediaSearchLoading}
+                    error={mediaSearchError}
+                    searched={searchState !== "idle"}
+                    selectedItemId={mediaOrigin?.kind === "search" ? selectedMediaItem?.id ?? null : null}
+                    onSelect={(item) => handleMediaItem(item, { kind: "search", query: item.title })}
+                  />
+                )}
               </div>
             </aside>
 
@@ -781,6 +872,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
                 onSubmit={handleSearch}
                 loading={searchState === "loading"}
                 disabled={!paired}
+                {...(searchSubMode === "release"
+                  ? { placeholder: "输入片名、1080p、10GB 以内等条件", inputLabel: "输入片源搜索条件" }
+                  : {})}
               />
             </div>
           </>

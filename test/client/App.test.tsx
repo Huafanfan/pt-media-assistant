@@ -305,6 +305,28 @@ describe("片源助手客户端", () => {
     expect(client.search).not.toHaveBeenCalled();
   });
 
+  it("runs an explicit release-only fallback without changing the media-first default", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: "搜索" }));
+    await user.click(screen.getByRole("tab", { name: "片源直搜" }));
+    const input = screen.getByPlaceholderText("输入片名、1080p、10GB 以内等条件");
+    await user.type(input, "星际穿越 1080p 10GB 以内");
+    await user.click(screen.getByRole("button", { name: "发送搜索" }));
+
+    expect(await screen.findByText(release.title)).toBeInTheDocument();
+    expect(client.search).toHaveBeenCalledWith({ query: "星际穿越 1080p 10GB 以内", limit: 20 }, "csrf-test");
+    expect(client.searchDiscoveryMedia).not.toHaveBeenCalled();
+    expect(screen.getByText(/关键词 星际穿越/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "选择" }));
+    expect(await screen.findByText("已选择 · 01")).toBeInTheDocument();
+    expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
+    expect(client.grab).not.toHaveBeenCalled();
+  });
+
   it("opens title suggestions in the same media inspector as discovery entries", async () => {
     const client = makeClient();
     const media = searchMediaItem;

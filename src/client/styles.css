@@ -1395,7 +1395,17 @@ textarea:focus-visible {
 .assistant-card.is-unverified { border-color:#54432f; }
 .assistant-availability.is-unverified { color:#e0b27f; }
 .assistant-open-button:disabled { cursor:not-allowed;opacity:.62; }
+.search-submode { display:inline-flex;margin-left:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden; }
+.search-submode button { min-height:40px;padding:6px 14px;border:0;background:transparent;color:var(--muted);font-size:0.82rem;font-weight:600; }
+.search-submode button + button { border-left:1px solid var(--border); }
+.search-submode button:hover { background:rgba(255,255,255,.025);color:var(--ivory); }
+.search-submode button.is-active { background:var(--selected);color:var(--copper); }
+.release-search-intent { display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;color:var(--muted);font-size:0.76rem; }
+.release-search-intent span { padding:3px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface); }
+.release-search-intent .release-search-elapsed { margin-left:auto;border:0;background:transparent;color:var(--faint);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 @media(max-width:700px) {
+ .search-submode { margin-left:8px; }
+ .search-submode button { padding-inline:10px; }
  .assistant-recommendations { padding:14px; }
  .assistant-card { padding:14px; }
  .assistant-card-heading { gap:8px;flex-wrap:wrap; }
