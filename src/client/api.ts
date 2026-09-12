@@ -19,6 +19,7 @@ import type {
   SearchResponse,
   SearchRequest,
   SeenMediaEntry,
+  ServiceCapabilities,
   ServiceHealth,
   SessionResponse,
   TorrentActionRequest,
@@ -262,9 +263,36 @@ function normalizeSession(payload: unknown): SessionResponse {
   };
 }
 
+function normalizeCapabilities(value: unknown): ServiceCapabilities | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const ai = asRecord(record.ai);
+  const webSearch = asRecord(record.webSearch);
+  const grab = asRecord(record.grab);
+  const persistence = asRecord(record.persistence);
+  if (!ai && !webSearch && !grab && !persistence) return undefined;
+  return {
+    ai: {
+      enabled: asBoolean(ai?.enabled),
+      configured: asBoolean(ai?.configured),
+      ...(typeof ai?.model === "string" ? { model: ai.model } : {})
+    },
+    webSearch: {
+      enabled: asBoolean(webSearch?.enabled),
+      configured: asBoolean(webSearch?.configured)
+    },
+    grab: { enabled: asBoolean(grab?.enabled) },
+    persistence: {
+      enabled: asBoolean(persistence?.enabled),
+      ...(typeof persistence?.error === "string" ? { error: persistence.error } : {})
+    }
+  };
+}
+
 function normalizeHealth(payload: unknown): ServiceHealth {
   const value = asRecord(payload);
   const services = asRecord(value?.services);
+  const capabilities = normalizeCapabilities(value?.capabilities);
   return {
     status: value?.status === "ok" ? "ok" : "degraded",
     version: asString(value?.version, "unknown"),
@@ -277,7 +305,8 @@ function normalizeHealth(payload: unknown): ServiceHealth {
             nasMounted: asBoolean(services.nasMounted)
           }
         }
-      : {})
+      : {}),
+    ...(capabilities ? { capabilities } : {})
   };
 }
 

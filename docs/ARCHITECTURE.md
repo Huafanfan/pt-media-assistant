@@ -77,7 +77,7 @@ Safe server start sequence:
 
 ## API surface
 
-- `GET /api/health`: minimal public readiness data.
+- `GET /api/health`: minimal public readiness data plus a read-only capability report. AI and web-search entries report `configured` (credentials present) and `enabled` (feature switch) separately, never a live probe; the health route never performs a paid model or search request and never returns keys, gateway URLs, or data paths.
 - `GET /api/live`: dependency-free process liveness used by the container healthcheck.
 - `POST /api/auth/pair`: fallback rate-limited pairing when trusted-LAN mode is disabled.
 - `GET /api/session`: creates a session for an allowlisted LAN peer, then returns its CSRF token.

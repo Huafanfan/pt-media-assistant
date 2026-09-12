@@ -468,6 +468,35 @@ describe("片源助手客户端", () => {
     expect(await screen.findByRole("button", { name: "标记已看" })).toBeInTheDocument();
   });
 
+  it("opens a read-only service status dialog that separates configured from enabled", async () => {
+    const client = makeClient();
+    vi.mocked(client.getHealth).mockResolvedValue({
+      status: "ok",
+      version: "test",
+      pairingRequired: false,
+      services: { prowlarr: true, qbittorrent: true, nasMounted: true },
+      capabilities: {
+        ai: { enabled: true, configured: true, model: "deepseek-flash" },
+        webSearch: { enabled: false, configured: true },
+        grab: { enabled: false },
+        persistence: { enabled: true }
+      }
+    });
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "服务状态" }));
+    const dialog = await screen.findByRole("dialog", { name: "服务与能力状态" });
+    expect(within(dialog).getByText("deepseek-flash")).toBeInTheDocument();
+    expect(within(dialog).getByText("AI 推荐").closest("li")).toHaveTextContent("已启用");
+    expect(within(dialog).getByText("联网搜索").closest("li")).toHaveTextContent("已配置 · 未启用");
+    expect(within(dialog).getByText("下载开关").closest("li")).toHaveTextContent("已关闭");
+    expect(within(dialog).getByText("已看与偏好持久化").closest("li")).toHaveTextContent("已启用");
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("opens the task view and pauses a task through the protected action route", async () => {
     const client = makeClient();
     const torrentHash = "a".repeat(40);

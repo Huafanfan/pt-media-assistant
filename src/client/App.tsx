@@ -28,6 +28,7 @@ import { PairingGate } from "./components/PairingGate";
 import { QueryComposer } from "./components/QueryComposer";
 import { ReleaseList, formatBytes } from "./components/ReleaseList";
 import { RuntimeStatusBar } from "./components/RuntimeSummary";
+import { ServiceStatusDialog } from "./components/ServiceStatusDialog";
 import { EmptyState, LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { TaskView } from "./components/TaskView";
@@ -166,6 +167,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [historySeen, setHistorySeen] = useState<SeenMediaEntry[]>([]);
   const [seenPendingKey, setSeenPendingKey] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const assistant = useAssistant(client, csrfToken, paired);
   const [assistantSelectedCard, setAssistantSelectedCard] = useState<AssistantRecommendationCard | null>(null);
   const [assistantReleaseResponses, setAssistantReleaseResponses] = useState<Record<string, DiscoveryReleaseResponse>>({});
@@ -833,6 +835,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
         paired={paired}
         healthError={healthError}
         onRefresh={refreshAllStatus}
+        onShowStatus={() => setStatusDialogOpen(true)}
         runtimeStatus={runtimeStatus}
       />
       <main className={`app-layout ${mode === "discover" ? "is-discovery" : mode === "tasks" ? "is-tasks" : "search-shell"} ${hasInspector ? "has-inspector" : "no-inspector"}`}>
@@ -990,6 +993,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
           </>
         )}
       </main>
+      {statusDialogOpen ? <ServiceStatusDialog health={bootstrap.health} onClose={() => setStatusDialogOpen(false)} /> : null}
     </div>
   );
 }

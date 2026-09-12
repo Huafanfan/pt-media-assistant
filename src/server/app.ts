@@ -336,6 +336,25 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
         version: APP_VERSION,
         pairingRequired: !config.trustLan && sessions.size === 0,
         services: servicesReady,
+        // Capability report only: presence of a key is reported as
+        // "configured", never as "ready". No keys, URLs, or paths here, and
+        // the health route never performs a paid model or search request.
+        capabilities: {
+          ai: {
+            enabled: config.aiEnabled === true,
+            configured: Boolean(config.aiBaseUrl && config.aiApiKey),
+            ...(config.aiEnabled && config.aiModel ? { model: config.aiModel } : {}),
+          },
+          webSearch: {
+            enabled: config.aiEnabled === true && config.aiWebEnabled === true,
+            configured: Boolean(config.tavilyApiKey),
+          },
+          grab: { enabled: config.allowGrab },
+          persistence: {
+            enabled: history.enabled,
+            ...(history.loadError ? { error: history.loadError } : {}),
+          },
+        },
       });
   });
 

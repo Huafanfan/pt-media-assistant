@@ -1,5 +1,24 @@
 import type { AssistantPreferences } from "./assistant.js";
 
+export type ServiceCapabilities = {
+  ai: {
+    enabled: boolean;
+    configured: boolean;
+    model?: string;
+  };
+  webSearch: {
+    enabled: boolean;
+    configured: boolean;
+  };
+  grab: {
+    enabled: boolean;
+  };
+  persistence: {
+    enabled: boolean;
+    error?: string;
+  };
+};
+
 export type ServiceHealth = {
   status: "ok" | "degraded";
   version: string;
@@ -9,6 +28,8 @@ export type ServiceHealth = {
     qbittorrent: boolean;
     nasMounted: boolean;
   };
+  /** Optional capability report; never contains keys, URLs, or paths. */
+  capabilities?: ServiceCapabilities;
 };
 
 export type NasStorageSummary = {

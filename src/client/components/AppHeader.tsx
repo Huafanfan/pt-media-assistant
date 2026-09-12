@@ -26,12 +26,14 @@ export function AppHeader({
   paired,
   healthError,
   onRefresh,
+  onShowStatus,
   runtimeStatus
 }: {
   health: ServiceHealth | null;
   paired: boolean;
   healthError?: string | null;
   onRefresh?: () => void;
+  onShowStatus?: () => void;
   runtimeStatus?: ReactNode;
 }) {
   const isHealthy = paired && health?.status === "ok";
@@ -48,6 +50,11 @@ export function AppHeader({
             {onRefresh ? (
               <button className="service-status-refresh" type="button" onClick={onRefresh} aria-label="刷新状态">
                 <RefreshCw size={14} aria-hidden="true" />
+              </button>
+            ) : null}
+            {onShowStatus ? (
+              <button className="service-status-detail" type="button" onClick={onShowStatus}>
+                服务状态
               </button>
             ) : null}
           </p>
