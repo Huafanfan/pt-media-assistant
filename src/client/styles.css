@@ -1468,4 +1468,7 @@ textarea:focus-visible {
 @media(max-width:430px) {
  .mode-switch button { padding-inline:6px;gap:0;font-size:0.8rem; }
  .mode-switch button svg { display:none; }
+ .search-mode-toolbar { flex-direction:column;align-items:stretch;gap:8px; }
+ .search-submode { margin-left:0; }
+ .search-submode button { flex:1 1 0; }
 }
