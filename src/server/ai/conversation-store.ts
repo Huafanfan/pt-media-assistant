@@ -49,6 +49,7 @@ export class ConversationStore {
     let c = conversationId ? this.conversations.get(conversationId) : undefined;
     if (conversationId && (!c || c.owner !== owner)) throw new AssistantError('CONVERSATION_EXPIRED', 404);
     if (c?.active) throw new AssistantError('TURN_IN_PROGRESS', 409);
+    const resuming = Boolean(c);
     if (this.starts.length >= 60 || this.starts.filter(x => x.owner === owner && this.now() - x.at < 60_000).length >= 3) throw new AssistantError('AI_BUDGET_EXCEEDED', 429, 60);
     if ([...this.conversations.values()].filter(x => x.active).length >= 2) throw new AssistantError('TURN_IN_PROGRESS', 429, 5);
     if (!c) {
@@ -61,6 +62,15 @@ export class ConversationStore {
       const knownSeen = this.seed?.seenIds();
       if (knownSeen && knownSeen.size > 0) c.knownSeen = knownSeen;
       this.conversations.set(c.id, c);
+    }
+    // Rebase a resumed conversation on the durable shared state so a stale
+    // client cannot overwrite newer preferences or resurrect entries that
+    // were manually unmarked on another device.
+    if (resuming && this.seed) {
+      c.preferences = this.seed.preferences();
+      const knownSeen = this.seed.seenIds();
+      if (knownSeen.size > 0) c.knownSeen = knownSeen;
+      else c.knownSeen = undefined;
     }
     if (c.history.length >= 20) throw new AssistantError('CONVERSATION_EXPIRED', 409);
     const id = randomUUID();

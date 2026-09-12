@@ -954,7 +954,9 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     reply.header("Cache-Control", "no-store");
     const parsed = seenBodySchema.safeParse(request.body);
     if (!parsed.success) return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
-    history.markSeen({ ...parsed.data, markedAt: new Date().toISOString() });
+    if (!history.markSeen({ ...parsed.data, markedAt: new Date().toISOString() })) {
+      return sendError(reply, 503, "History write failed", "HISTORY_WRITE_FAILED");
+    }
     return reply.send({ ok: true });
   });
 
@@ -965,7 +967,9 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     reply.header("Cache-Control", "no-store");
     const parsed = seenParamsSchema.safeParse(request.params);
     if (!parsed.success) return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
-    history.unmarkSeen(parsed.data.mediaType, parsed.data.mediaId);
+    if (!history.unmarkSeen(parsed.data.mediaType, parsed.data.mediaId)) {
+      return sendError(reply, 503, "History write failed", "HISTORY_WRITE_FAILED");
+    }
     return reply.send({ ok: true });
   });
 

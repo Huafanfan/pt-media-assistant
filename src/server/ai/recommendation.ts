@@ -316,9 +316,12 @@ export function buildRecommendationCard(
   };
 }
 
-export function filterCandidateForPreferences(media: DiscoveryMedia, prefs: AssistantPreferences): boolean {
+export function filterCandidateForPreferences(media: DiscoveryMedia, prefs: AssistantPreferences, knownSeen?: ReadonlySet<string>): boolean {
   const mediaId = `${media.mediaType}:${media.id}`;
   if (prefs.seenMediaIds.includes(media.id) || prefs.seenMediaIds.includes(mediaId)) return false;
+  // The persisted seen collection can exceed the bounded preference array;
+  // the durable set stays authoritative for exclusion.
+  if (knownSeen?.has(media.id) || knownSeen?.has(mediaId)) return false;
   const genres = media.genres.map((genre) => genre.toLocaleLowerCase());
   if (prefs.includeGenres.length && !prefs.includeGenres.every((genre) => genres.some((candidate) => candidate.includes(genre.toLocaleLowerCase())))) return false;
   if (prefs.excludeGenres.length && !genres.length) return false;

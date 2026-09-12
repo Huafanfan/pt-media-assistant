@@ -62,9 +62,10 @@ function requestedType(user: string): 'tv' | 'movie' | undefined {
   if (/电影/iu.test(positive)) return 'movie';
   return undefined;
 }
-function contradicts(card: AssistantRecommendationCard, prefs: AssistantPreferences): boolean {
+function contradicts(card: AssistantRecommendationCard, prefs: AssistantPreferences, knownSeen?: ReadonlySet<string>): boolean {
   if (prefs.mediaType && card.mediaType !== prefs.mediaType) return true;
   if (prefs.seenMediaIds.includes(card.mediaId) || prefs.seenMediaIds.includes(`${card.mediaType}:${card.mediaId}`)) return true;
+  if (knownSeen?.has(card.mediaId) || knownSeen?.has(`${card.mediaType}:${card.mediaId}`)) return true;
   if (prefs.excludeGenres.some(g => card.genres.some(v => v.toLowerCase().includes(g.toLowerCase())))) return true;
   const year = card.year ? Number(card.year) : NaN;
   return Number.isFinite(year) && ((prefs.yearFrom !== null && year < prefs.yearFrom) || (prefs.yearTo !== null && year > prefs.yearTo));
@@ -153,7 +154,7 @@ export class WebRecommendationService {
     const cards: AssistantRecommendationCard[] = [];
     const snapshot = (phase: 'verifying' | 'checking' | 'complete') => {
       signal.throwIfAborted();
-      const eligible = cards.filter(card => !contradicts(card, c.preferences));
+      const eligible = cards.filter(card => !contradicts(card, c.preferences, c.knownSeen));
       const pending = eligible.filter(card => needsHardEvidence(card, c.preferences) || (c.preferences.onlyAvailable && card.availability !== 'available'));
       const recommendations = eligible.filter(card => !pending.includes(card));
       const response = assistantTurnResponseSchema.parse({ conversationId: c.id, turnId: turn.id, clientTurnId: turn.clientTurnId,
@@ -254,7 +255,7 @@ export class WebRecommendationService {
     }
     snapshot('verifying');
     const runner = new ToolRunner(this.discovery, c, signal);
-    await Promise.all(selected.map(async ({ proposed }, index) => {
+    const verifyCandidate = async ({ proposed }: (typeof selected)[number], index: number): Promise<void> => {
       try {
         const found = await measure('metadata', () => this.discovery.searchMedia(proposed.title, 5));
         signal.throwIfAborted(); usage.toolExecutions++;
@@ -273,7 +274,7 @@ export class WebRecommendationService {
         const verified = buildRecommendationCard(c.id, turn.id, index, candidate, c.preferences, cleanReason(proposed.reason));
         cards[index] = { ...verified, cardId: previous.cardId, identityStatus: 'verified', sources: previous.sources, contentKind: proposed.contentKind };
         snapshot('checking');
-        if (contradicts(cards[index]!, c.preferences)) return;
+        if (contradicts(cards[index]!, c.preferences, c.knownSeen)) return;
         await measure('pt', () => runner.execute('check_pt_availability', { mediaId: media.id, mediaType: media.mediaType }));
         signal.throwIfAborted();
         cards[index] = { ...buildRecommendationCard(c.id, turn.id, index, c.candidates.get(key)!, c.preferences, cleanReason(proposed.reason)),
@@ -283,8 +284,8 @@ export class WebRecommendationService {
         signal.throwIfAborted();
         warnings.push({ code: 'METADATA_UNAVAILABLE', message: '部分作品详情暂未核实，可先查看来源。' });
       }
-      return;
-    }));
+    };
+    await Promise.all(selected.map((candidate, index) => verifyCandidate(candidate, index)));
     signal.throwIfAborted();
     usage.toolExecutions += runner.executions;
     warnings.push(...runner.warnings);

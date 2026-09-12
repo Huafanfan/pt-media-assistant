@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConversationStore } from "../../src/server/ai/conversation-store.js";
+import { filterCandidateForPreferences } from "../../src/server/ai/recommendation.js";
 import { updatePreferences } from "../../src/server/ai/tools.js";
 import { HistoryStore } from "../../src/server/history-store.js";
 import { defaultAssistantPreferences } from "../../src/shared/assistant.js";
@@ -44,7 +45,7 @@ describe("持久化历史存储", () => {
     store.markSeen({ mediaId: "42", mediaType: "tv", title: "某剧", markedAt });
 
     const parsed = JSON.parse(await readFile(path, "utf8")) as { version: number; seen: unknown[] };
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.seen).toHaveLength(1);
     expect((await readdir(directory)).filter((name) => name.includes(".tmp-"))).toEqual([]);
   });
@@ -130,5 +131,87 @@ describe("会话从持久化状态初始化", () => {
     // A persisted seen ID is valid even though no candidate is in memory yet.
     expect(() => updatePreferences(turn.conversation, { seenMediaIds: ["movie:7"] })).not.toThrow();
     expect(() => updatePreferences(turn.conversation, { seenMediaIds: ["movie:404"] })).toThrow();
+  });
+
+  it("rebases a resumed conversation on the durable shared preferences", () => {
+    let shared = defaultAssistantPreferences();
+    const store = new ConversationStore(now, {
+      preferences: () => shared,
+      seenIds: () => new Set(["movie:7"]),
+    });
+    const first = store.start("owner", "turn-1").turn;
+    const conversationId = first.conversation.id;
+    first.conversation.active = undefined;
+    // Another device changed the shared preferences after this conversation started.
+    shared = { ...shared, resolution: "2160p" };
+    const second = store.start("owner", "turn-2", conversationId).turn;
+    expect(second.conversation.preferences.resolution).toBe("2160p");
+  });
+});
+
+describe("持久化正确性回归", () => {
+  it("persists a preference-only unmark across reloads", async () => {
+    const path = join(await temporaryDirectory(), "history.json");
+    const store = new HistoryStore({ path, now });
+    store.savePreferences({ ...defaultAssistantPreferences(), seenMediaIds: ["tv:999"] });
+    expect(store.knownSeenIds().has("tv:999")).toBe(true);
+    expect(store.unmarkSeen("tv", "999")).toBe(true);
+
+    const reloaded = new HistoryStore({ path, now });
+    expect(reloaded.knownSeenIds().has("tv:999")).toBe(false);
+    expect(reloaded.preferences().seenMediaIds).not.toContain("tv:999");
+  });
+
+  it("keeps the full durable seen set authoritative beyond the preference cap", () => {
+    const store = new HistoryStore({ now });
+    for (let index = 0; index < 130; index += 1) {
+      store.markSeen({ mediaId: String(index), mediaType: "movie", title: `电影 ${index}`, markedAt });
+    }
+    const known = store.knownSeenIds();
+    expect(known.size).toBe(260);
+    // The oldest entry fell out of the bounded preference array but is still excluded.
+    expect(store.preferences().seenMediaIds).not.toContain("movie:0");
+    const oldest = { id: "0", title: "电影 0", mediaType: "movie" as const, genres: [], summary: "", sourceUrl: "" };
+    expect(filterCandidateForPreferences(oldest, store.preferences(), known)).toBe(false);
+  });
+
+  it("does not let a stale conversation resurrect a manually unmarked entry", () => {
+    const store = new HistoryStore({ now });
+    store.markSeen({ mediaId: "7", mediaType: "movie", title: "某电影", markedAt });
+    expect(store.unmarkSeen("movie", "7")).toBe(true);
+    // A conversation that still carries the ID in its working set saves later.
+    expect(store.savePreferences({ ...defaultAssistantPreferences(), seenMediaIds: ["movie:7", "7"] })).toBe(true);
+    expect(store.knownSeenIds().has("movie:7")).toBe(false);
+    expect(store.snapshot().seen).toEqual([]);
+  });
+
+  it("reports a failed write and keeps the previous valid state", async () => {
+    const directory = await temporaryDirectory();
+    const blocker = join(directory, "blocker");
+    await writeFile(blocker, "not a directory", "utf8");
+    const store = new HistoryStore({ path: join(blocker, "history.json"), now });
+
+    expect(store.markSeen({ mediaId: "1", mediaType: "movie", title: "某电影", markedAt })).toBe(false);
+    expect(store.loadError).toMatch(/写入失败/u);
+    expect(store.snapshot().seen).toEqual([]);
+    expect(store.knownSeenIds().size).toBe(0);
+  });
+
+  it("loads a version 1 file and upgrades it on the next write", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "history.json");
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      seen: [{ mediaId: "5", mediaType: "movie", title: "旧记录", markedAt }],
+      preferences: defaultAssistantPreferences(),
+    }), "utf8");
+
+    const store = new HistoryStore({ path, now });
+    expect(store.loadError).toBeUndefined();
+    expect(store.snapshot().seen).toHaveLength(1);
+    expect(store.unmarkSeen("movie", "5")).toBe(true);
+    const raw = JSON.parse(await readFile(path, "utf8")) as { version: number; removed: string[] };
+    expect(raw.version).toBe(2);
+    expect(raw.removed).toContain("movie:5");
   });
 });

@@ -123,7 +123,7 @@ export class AssistantService {
     const autoCheckKeys = [...new Set(keys)]
       .filter((key) => {
         const candidate = c.candidates.get(key);
-        if (!candidate || !filterCandidateForPreferences(candidate.media,c.preferences)) return false;
+        if (!candidate || !filterCandidateForPreferences(candidate.media,c.preferences,c.knownSeen)) return false;
         if (runner.checked.has(key)) return false;
         if (candidate.releaseError) return true;
         const actionableUntil = candidate.snapshot?.actionableUntil ?? candidate.snapshot?.expiresAt;
@@ -134,7 +134,7 @@ export class AssistantService {
       .slice(0,3);
     // These checks use the same settled preferences and distinct candidates.
     // ToolRunner reserves budgets synchronously before each upstream request.
-    await Promise.all(autoCheckKeys.map(async (key) => {
+    const checkCandidate = async (key: string): Promise<void> => {
       const candidate = c.candidates.get(key);
       if (!candidate) return;
       try {
@@ -147,11 +147,11 @@ export class AssistantService {
         }
         throw error;
       }
-      return;
-    }));
+    };
+    await Promise.all(autoCheckKeys.map((key) => checkCandidate(key)));
     const recommendations=[];
     for(const key of [...new Set(keys)].slice(0,5)) {
-      const candidate=c.candidates.get(key); if(!candidate||!filterCandidateForPreferences(candidate.media,c.preferences)) continue;
+      const candidate=c.candidates.get(key); if(!candidate||!filterCandidateForPreferences(candidate.media,c.preferences,c.knownSeen)) continue;
       const model=requested.find(x=>x.mediaId===candidate.media.id);
       const card=buildRecommendationCard(c.id,turn.id,recommendations.length,candidate,c.preferences,model?safeReason(model.reason):'');
       if(c.preferences.onlyAvailable&&card.availability!=='available') continue;

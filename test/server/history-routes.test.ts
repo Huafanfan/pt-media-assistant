@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/server/app.js";
 import { PairingService, SessionStore } from "../../src/server/auth.js";
 import { HistoryStore } from "../../src/server/history-store.js";
@@ -25,8 +28,8 @@ const readyNas = {
   storage: vi.fn(async () => ({ path: config.nasPath, mounted: true, ready: true, totalBytes: 100, usedBytes: 40, freeBytes: 60 })),
 };
 
-async function makeApp() {
-  const history = new HistoryStore({ now: () => Date.parse("2026-09-12T10:00:00.000Z") });
+async function makeApp(historyOverride?: HistoryStore) {
+  const history = historyOverride ?? new HistoryStore({ now: () => Date.parse("2026-09-12T10:00:00.000Z") });
   const app = await createApp({
     config,
     pairing: new PairingService({ pairingCode: config.pairingCode, sessionStore: new SessionStore() }),
@@ -57,6 +60,10 @@ async function makeApp() {
 }
 
 describe("持久化历史路由", () => {
+  const temporaryDirectories: string[] = [];
+  afterEach(async () => {
+    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  });
   it("marks and unmarks seen media and returns the family-shared snapshot", async () => {
     const { app, headers } = await makeApp();
     const empty = await app.inject({ method: "GET", url: "/api/history", headers });
@@ -123,6 +130,27 @@ describe("持久化历史路由", () => {
     const badDelete = await app.inject({ method: "DELETE", url: "/api/history/seen/movie/not-an-id!", headers });
     expect(badDelete.statusCode).toBe(400);
     expect(history.snapshot().seen).toEqual([]);
+    await app.close();
+  });
+
+  it("reports a sanitized failure when durable state cannot be written", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pt-history-routes-"));
+    temporaryDirectories.push(directory);
+    const blocker = join(directory, "blocker");
+    await writeFile(blocker, "not a directory", "utf8");
+    const { app, headers } = await makeApp(new HistoryStore({
+      path: join(blocker, "history.json"),
+      now: () => Date.parse("2026-09-12T10:00:00.000Z"),
+    }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/history/seen",
+      headers,
+      payload: { mediaId: "1293000", mediaType: "movie", title: "星际穿越" },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "History write failed", code: "HISTORY_WRITE_FAILED" });
     await app.close();
   });
 });
