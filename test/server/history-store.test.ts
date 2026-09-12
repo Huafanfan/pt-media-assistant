@@ -86,6 +86,8 @@ describe("持久化历史存储", () => {
     store.markSeen({ mediaId: "999", mediaType: "tv", title: "某剧", markedAt });
     expect(store.unmarkSeen("tv", "999")).toBe(true);
     const reloaded = new HistoryStore({ path, now });
+    // `type:id` tombstones must stay schema-valid across reloads.
+    expect(reloaded.loadError).toBeUndefined();
     expect(reloaded.knownSeenIds().has("tv:999")).toBe(false);
     expect(reloaded.knownSeenIds().has("999")).toBe(false);
     expect(reloaded.snapshot().seen).toEqual([]);
@@ -213,5 +215,9 @@ describe("持久化正确性回归", () => {
     const raw = JSON.parse(await readFile(path, "utf8")) as { version: number; removed: string[] };
     expect(raw.version).toBe(2);
     expect(raw.removed).toContain("movie:5");
+    // The upgraded file must load cleanly, including the `type:id` tombstone.
+    const reloaded = new HistoryStore({ path, now });
+    expect(reloaded.loadError).toBeUndefined();
+    expect(reloaded.knownSeenIds().has("movie:5")).toBe(false);
   });
 });

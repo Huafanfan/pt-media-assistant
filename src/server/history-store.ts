@@ -22,7 +22,8 @@ const stateSchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]),
   seen: z.array(seenEntrySchema).max(MAX_SEEN_ENTRIES),
   preferences: assistantPreferencesSchema,
-  removed: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u)).max(MAX_REMOVED_IDS).default([]),
+  // Tombstones carry both `id` and `type:id` forms.
+  removed: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/u)).max(MAX_REMOVED_IDS).default([]),
 }).strict();
 
 type HistoryState = {
