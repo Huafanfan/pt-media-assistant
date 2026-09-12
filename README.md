@@ -80,6 +80,8 @@
 /srv/data/pt-media-assistant/prowlarr/  # Prowlarr /config
 ```
 
+已看记录与 AI 偏好是唯一的持久化状态，存放在 Docker 命名卷 `pt-media-assistant_pt-media-data`（容器内 `/data`）；重建 app 不会丢失，只有显式 `docker compose down -v` 或删除卷才会清空。
+
 应用只通过 `PT_MEDIA_HOST=192.168.1.2` 和 `PT_MEDIA_PORT=4178` 绑定服务器地址；Compose 没有 `ports` 映射。应用采用只读根文件系统、非 root、`cap_drop: ALL`、`no-new-privileges`、进程数/内存上限和日志轮转，且两个容器都使用 `restart: unless-stopped`。Prowlarr 的 API 只通过 `http://127.0.0.1:9696` 供应用访问。
 
 ### 服务器启动前的安全前置条件
