@@ -51,6 +51,8 @@ export type AppConfig = {
   aiTurnTimeoutMs?: number;
   aiWebEnabled?: boolean;
   tavilyApiKey?: string;
+  /** Local directory for durable state such as seen records and preferences. */
+  dataDir?: string;
 };
 
 function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -180,6 +182,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const aiEnabled = parseBoolean(readEnv(env, "PT_MEDIA_AI_ENABLED"));
+  // Durable state stays outside the read-only container root; the Compose
+  // deployment mounts a writable volume at /data. Only an explicit setting
+  // enables file persistence here: hand-built test configs stay in memory.
+  // The native entry point (startServer) applies the ./.data/app default.
+  const dataDir = readEnv(env, "PT_MEDIA_DATA_DIR");
+  if (dataDir && (!dataDir.startsWith("/") || dataDir.includes("\0"))) {
+    throw new Error("PT_MEDIA_DATA_DIR must be an absolute path");
+  }
   // Select URL and credential as one pair. DeepSeek takes precedence over
   // the previous gateways, but a partial DeepSeek configuration must not
   // borrow a URL or key from either of them.
@@ -229,6 +239,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     aiTurnTimeoutMs,
     aiWebEnabled: parseBoolean(readEnv(env, "PT_MEDIA_AI_WEB_ENABLED")),
     tavilyApiKey: readEnv(env, "TAVILY_API_KEY") ?? readSecretFile(env, "TAVILY_API_KEY_FILE"),
+    ...(dataDir ? { dataDir } : {}),
     ...(configuredOrigin ? { configuredOrigin: parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN") } : {}),
   };
 }

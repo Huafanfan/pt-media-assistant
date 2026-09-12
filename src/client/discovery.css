@@ -578,6 +578,42 @@
   white-space: nowrap;
 }
 
+.discovery-seen-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.discovery-seen-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--discovery-divider);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--discovery-muted);
+  font-size: 0.76rem;
+}
+
+.discovery-seen-button:hover {
+  border-color: var(--discovery-copper);
+  color: var(--discovery-copper);
+}
+
+.discovery-seen-button.is-seen {
+  border-color: var(--discovery-copper);
+  background: rgba(242, 122, 36, 0.08);
+  color: var(--discovery-copper);
+}
+
+.discovery-seen-note {
+  color: var(--discovery-muted);
+  font-size: 0.72rem;
+}
+
 .discovery-cast {
   display: flex;
   flex-direction: column;

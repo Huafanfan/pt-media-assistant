@@ -22,6 +22,7 @@
 - **明确下载**：选择只生成预览；只有点击“加入下载”并确认后，服务端才会抓取片源。
 - **运行状态**：顶部状态栏显示 NAS 剩余空间和进行中的下载数量；选中片源后可查看完整进度、速度和 ETA。
 - **任务管理**：“任务”页展示全部 qBittorrent 任务与进度，支持暂停、继续，以及二次确认后“仅移除任务、保留已下载文件”。
+- **已看与偏好持久化**：作品详情可标记/取消“已看”，AI 偏好与已看记录以家庭共享方式原子写入本地 JSON，重启和容器重建后保留；AI 推荐会排除已看作品。
 - **手机可用**：响应式布局；移动端把已选片源放进底部检查器，不需要滚到页面最下面寻找操作。
 - **局域网优先**：默认监听局域网地址，适合家中 Mac 作为服务端、手机作为客户端的使用方式。
 
@@ -172,6 +173,7 @@ npm start
 | `PROWLARR_PROXY_TOKEN_FILE` | 留空 | 可选；读取 bridge-only 代理的独立令牌 |
 | `QBITTORRENT_URL` | `http://localhost:8080` | qBittorrent Web API 地址 |
 | `PT_MEDIA_NAS_PATH` | `/mnt/nas/pt`（服务器）；`/Volumes/YourNAS/pt`（macOS） | 下载目标逻辑路径；服务器 Compose 不绑定目录 |
+| `PT_MEDIA_DATA_DIR` | `/data`（容器）；`./.data/app`（原生默认） | 已看记录与 AI 偏好的持久化目录；容器使用命名卷 |
 | `PT_MEDIA_NAS_CHECK_MODE` | `sentinel`（服务器 Compose）；`smbfs`（原生 macOS） | NAS 安全检查方式 |
 | `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` | 容器 NAS 安全哨兵文件名 |
 | `PT_MEDIA_NAS_SENTINEL_PATH` | `/run/pt-media-nas-sentinel` | 容器内单文件绑定路径 |
@@ -209,6 +211,9 @@ npm start
 | `POST` | `/api/grab` | 在明确确认后提交下载 |
 | `GET` | `/api/torrents` | qBittorrent 任务摘要 |
 | `POST` | `/api/torrents/actions` | 暂停、继续或仅移除任务（不删除文件，需要会话与 CSRF） |
+| `GET` | `/api/history` | 家庭共享的已看记录与 AI 偏好 |
+| `POST` | `/api/history/seen` | 标记作品已看（需要会话与 CSRF） |
+| `DELETE` | `/api/history/seen/:mediaType/:mediaId` | 取消已看（需要会话与 CSRF） |
 | `GET` | `/api/storage` | NAS 总量、已用和可用空间 |
 
 所有 JSON 响应都经过字段白名单和长度限制；上游异常会转换为可读的错误状态，不把原始响应直接暴露给浏览器。
@@ -223,7 +228,7 @@ npm run build        # 生产构建
 npm audit --omit=dev # 依赖安全检查
 ```
 
-项目不需要外部数据库；榜单页、演职员资料、作品搜索、海报、演员索引和片源可用性结果都保存在服务端进程内存缓存中。作品详情和片源都按规范化的媒体类型与作品 ID 复用，片源一次查询最多保留 50 个候选供界面本地分页。普通发现请求不会因为页面重新打开而重复查询 Prowlarr；页面上的刷新按钮通过受保护的刷新接口主动更新结果。豆瓣公开集合不会把任意 URL 或用户 Cookie 变成客户端输入。
+项目不需要外部数据库；榜单页、演职员资料、作品搜索、海报、演员索引和片源可用性结果都保存在服务端进程内存缓存中。已看记录与 AI 偏好是唯一持久化状态：以 JSON 文件（临时文件 + rename 原子写入）存于 `PT_MEDIA_DATA_DIR`，容器内为 `/data` 命名卷；文件损坏时保留原文件并以默认状态启动，不会静默覆盖。作品详情和片源都按规范化的媒体类型与作品 ID 复用，片源一次查询最多保留 50 个候选供界面本地分页。普通发现请求不会因为页面重新打开而重复查询 Prowlarr；页面上的刷新按钮通过受保护的刷新接口主动更新结果。豆瓣公开集合不会把任意 URL 或用户 Cookie 变成客户端输入。
 
 ## 项目结构
 

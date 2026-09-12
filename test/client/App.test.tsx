@@ -142,6 +142,9 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
     grab,
     getTorrents: vi.fn().mockResolvedValue([]),
     torrentAction: vi.fn().mockResolvedValue({ ok: true }),
+    getHistory: vi.fn().mockResolvedValue({ seen: [], preferences: defaultAssistantPreferences() }),
+    markSeen: vi.fn().mockResolvedValue(undefined),
+    unmarkSeen: vi.fn().mockResolvedValue(undefined),
     getStorage: vi.fn().mockResolvedValue({
       path: "/Volumes/YourNAS/pt",
       mounted: true,
@@ -445,6 +448,24 @@ describe("片源助手客户端", () => {
     expect(await screen.findByText("已有相同任务")).not.toBeNull();
     expect(screen.getByRole("button", { name: "加入下载" })).toBeDisabled();
     expect(client.grab).not.toHaveBeenCalled();
+  });
+
+  it("marks a work as seen and unmarks it from the shared history", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /奥德赛，第 1 名/ }));
+    await user.click(await screen.findByRole("button", { name: "标记已看" }));
+    await waitFor(() => expect(client.markSeen).toHaveBeenCalledWith(
+      { mediaId: discoveryItem.id, mediaType: "movie", title: discoveryItem.title },
+      "csrf-test"
+    ));
+    expect(await screen.findByRole("button", { name: "取消已看" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "取消已看" }));
+    await waitFor(() => expect(client.unmarkSeen).toHaveBeenCalledWith("movie", discoveryItem.id, "csrf-test"));
+    expect(await screen.findByRole("button", { name: "标记已看" })).toBeInTheDocument();
   });
 
   it("opens the task view and pauses a task through the protected action route", async () => {

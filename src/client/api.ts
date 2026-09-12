@@ -11,11 +11,14 @@ import type {
   GrabPreviewResponse,
   GrabRequest,
   GrabResponse,
+  HistoryResponse,
+  MarkSeenRequest,
   NasStorageSummary,
   PairRequest,
   ReleaseSummary,
   SearchResponse,
   SearchRequest,
+  SeenMediaEntry,
   ServiceHealth,
   SessionResponse,
   TorrentActionRequest,
@@ -23,8 +26,10 @@ import type {
   TorrentSummary
 } from "../shared/contracts";
 import {
+  assistantPreferencesSchema,
   assistantStreamEventSchema,
   assistantTurnResponseSchema,
+  defaultAssistantPreferences,
   type AssistantTurnRequest,
   type AssistantTurnResponse
 } from "../shared/assistant";
@@ -587,6 +592,27 @@ function normalizeTorrents(payload: unknown): TorrentSummary[] {
   return list.map(normalizeTorrent).filter((item): item is TorrentSummary => item !== null);
 }
 
+function asMediaType(value: unknown): "movie" | "tv" | null {
+  if (value === "movie" || value === "tv") return value;
+  return null;
+}
+
+function normalizeHistory(payload: unknown): HistoryResponse {
+  const value = asRecord(payload);
+  const seenSource = Array.isArray(value?.seen) ? value.seen : [];
+  const seen = seenSource.flatMap((entry): SeenMediaEntry[] => {
+    const record = asRecord(entry);
+    if (!record) return [];
+    const mediaId = asString(record.mediaId);
+    const title = asString(record.title);
+    const mediaType = asMediaType(record.mediaType);
+    if (!mediaId || !title || !mediaType) return [];
+    return [{ mediaId, mediaType, title, markedAt: asString(record.markedAt) }];
+  });
+  const preferences = assistantPreferencesSchema.safeParse(value?.preferences);
+  return { seen, preferences: preferences.success ? preferences.data : defaultAssistantPreferences() };
+}
+
 export type ApiClient = {
   getSession(): Promise<SessionResponse>;
   getHealth(): Promise<ServiceHealth>;
@@ -647,6 +673,9 @@ export type ApiClient = {
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
   torrentAction?(request: TorrentActionRequest, csrfToken: string): Promise<TorrentActionResponse>;
+  getHistory?(csrfToken: string): Promise<HistoryResponse>;
+  markSeen?(request: MarkSeenRequest, csrfToken: string): Promise<void>;
+  unmarkSeen?(mediaType: "movie" | "tv", mediaId: string, csrfToken: string): Promise<void>;
   getStorage(csrfToken: string): Promise<NasStorageSummary>;
   createAssistantTurnStream?(
     request: AssistantTurnRequest,
@@ -863,6 +892,30 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
         await requestJson<unknown>("/api/storage", {
           headers: withCsrf(csrfToken)
         }, fetchImpl)
+      );
+    },
+
+    async getHistory(csrfToken) {
+      return normalizeHistory(
+        await requestJson<unknown>("/api/history", {
+          headers: withCsrf(csrfToken)
+        }, fetchImpl)
+      );
+    },
+
+    async markSeen(request, csrfToken) {
+      await requestJson<unknown>("/api/history/seen", {
+        method: "POST",
+        headers: withCsrf(csrfToken),
+        body: JSON.stringify(request)
+      }, fetchImpl);
+    },
+
+    async unmarkSeen(mediaType, mediaId, csrfToken) {
+      await requestJson<unknown>(
+        `/api/history/seen/${encodeURIComponent(mediaType)}/${encodeURIComponent(mediaId)}`,
+        { method: "DELETE", headers: withCsrf(csrfToken) },
+        fetchImpl
       );
     },
 

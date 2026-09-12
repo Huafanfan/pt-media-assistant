@@ -81,6 +81,12 @@ describe("container configuration", () => {
       .toBe("test-only-proxy-token");
   });
 
+  it("only enables durable state when a data directory is configured", () => {
+    expect(loadConfig({}).dataDir).toBeUndefined();
+    expect(loadConfig({ PT_MEDIA_DATA_DIR: "/data" }).dataDir).toBe("/data");
+    expect(() => loadConfig({ PT_MEDIA_DATA_DIR: "relative/path" })).toThrow();
+  });
+
   it("configures sentinel mode with a validated hidden marker", () => {
     const config = loadConfig({
       PT_MEDIA_NAS_PATH: "/Volumes/YourNAS/pt",

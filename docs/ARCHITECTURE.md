@@ -47,6 +47,7 @@ iPhone browser
 | `PT_MEDIA_NAS_SENTINEL` | `.pt-media-assistant-mounted` |
 | `PT_MEDIA_NAS_SENTINEL_PATH` | `/run/pt-media-nas-sentinel` in containers |
 | `PT_MEDIA_NAS_STATUS_PATH` | unset on Linux; optional host-generated snapshot in OrbStack |
+| `PT_MEDIA_DATA_DIR` | `/data` in Compose; `./.data/app` for native runs. Durable seen records and AI preferences |
 | `PT_MEDIA_TRUST_LAN` | `true`; private/LAN peers receive an automatic session |
 | `PT_MEDIA_PAIRING_CODE` | optional fallback when trusted-LAN mode is disabled |
 | `PT_MEDIA_ALLOW_GRAB` | `false`; must be explicitly set to `1` to permit grabs |
@@ -100,6 +101,10 @@ Safe server start sequence:
 - `POST /api/grab/preview`: revalidates the release, NAS mount, and duplicate state.
 - `POST /api/grab`: repeats all checks and asks Prowlarr to send the release to qBittorrent.
 - `GET /api/torrents`: returns sanitized qBittorrent status.
+- `POST /api/torrents/actions`: pauses, resumes, or removes a task record (`deleteFiles=false`) by validated infohash; bounded to 50 hashes, never `all`, and never delete-files. Requires session, exact Origin, and CSRF.
+- `GET /api/history`: returns the family-shared seen records and AI preferences.
+- `POST /api/history/seen`: marks one movie/TV work as seen; same session/Origin/CSRF checks.
+- `DELETE /api/history/seen/:mediaType/:mediaId`: removes one seen record.
 - `GET /api/storage`: after a fresh native smbfs or container sentinel/status preflight, returns JSON-safe NAS total, used, and user-available bytes.
 
 ## Deliberate MVP constraints
@@ -107,7 +112,7 @@ Safe server start sequence:
 - Discovery uses public, undocumented Douban web collection, subject-detail, and actor/filmography data behind a dedicated adapter, a two-hour page/detail/poster/profile cache, in-flight coalescing, and stale-cache fallback. Upstream shape changes can degrade discovery without affecting manual search or downloading.
 - PT discovery checks are globally serialized with a 1.2-second minimum start interval. Availability results are cached in the backend process per canonical media type and item ID for up to 24 hours, including empty results, with at most 50 candidates retained per snapshot. The browser paginates that snapshot locally; the browser does not decide the cache lifetime, and the explicit refresh action is available when a user wants a newer result.
 - Discovery rankings remain deterministic. The optional AI recommendation mode uses a server-side AI SDK compatible provider and bounded read-only tools; preferences and minimal public metadata/release summaries reach the configured model gateway. It cannot invoke grab. See [AI operations](AI_OPERATIONS.md) and [AI-001](features/AI_RECOMMENDATION.md).
-- LAN sessions are in memory and expire when the server restarts.
+- LAN sessions are in memory and expire when the server restarts. Seen records and AI preferences are the only durable state: a family-shared JSON file under `PT_MEDIA_DATA_DIR` (a named volume mounted at `/data` in Compose), written atomically with a temporary file plus rename. A damaged file is preserved beside the store and the app starts from defaults rather than silently replacing it.
 - The client polls sanitized torrent and storage status every 15 seconds while the document is visible, pauses automatic requests while hidden, and refreshes once immediately when visibility returns. It never receives tracker URLs, passkeys, or raw mount output.
 - The initial qBittorrent state follows the Prowlarr download-client setting; the configured client now uses `started` for the one-step flow.
 - HTTPS is not bundled. Use only on a trusted home LAN; a later Tailscale or TLS layer can harden remote access.

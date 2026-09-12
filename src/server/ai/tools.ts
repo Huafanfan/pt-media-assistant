@@ -24,8 +24,9 @@ export function updatePreferences(c: Conversation, patch: unknown) {
   const parsed = preferencePatch.parse(patch);
   const clean = Object.fromEntries(Object.entries(parsed).filter(([,value]) => value !== undefined));
   const merged = assistantPreferencesSchema.parse({...c.preferences, ...clean});
-  // A model may only mark a canonical entity already present in this session as seen.
-  if (merged.seenMediaIds.some(id => ![...c.candidates.values()].some(x => x.media.id === id || `${x.media.mediaType}:${x.media.id}` === id))) throw new Error('Unknown seen media');
+  // A model may only mark a canonical entity already present in this session
+  // or one already recorded in the persisted seen store as seen.
+  if (merged.seenMediaIds.some(id => !c.knownSeen?.has(id) && ![...c.candidates.values()].some(x => x.media.id === id || `${x.media.mediaType}:${x.media.id}` === id))) throw new Error('Unknown seen media');
   c.preferences = merged;
 }
 export class ToolRunner {

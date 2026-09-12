@@ -3,11 +3,11 @@ import { AssistantService } from "./ai/orchestrator.js";
 import { WebRecommendationService } from "./ai/web-recommendation.js";
 import { TavilySearchProvider, type WebSearchProvider } from "./ai/web-search.js";
 import { PassThrough } from "node:stream";
-import { AssistantError } from "./ai/conversation-store.js";
+import { AssistantError, ConversationStore } from "./ai/conversation-store.js";
 import { providerFromConfig, type CompatibleChatProvider } from "./ai/provider.js";
 import type { AssistantDiscovery } from "./ai/tools.js";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
@@ -45,15 +45,15 @@ import {
 import { loadConfig, type AppConfig } from "./config.js";
 import { DiscoveryItemNotFoundError, DiscoveryService } from "./discovery.js";
 import { DoubanClient } from "./douban.js";
+import { HistoryStore } from "./history-store.js";
 import { NasGuard, type NasPreflight } from "./nas.js";
 import {
   ProwlarrClient,
   ReleaseNotFoundError,
-  UpstreamError,
   type JsonObject,
 } from "./prowlarr.js";
 import { parseQuery, parseSearchRequest } from "./parser.js";
-import { QBittorrentClient, QBittorrentError, type RawTorrent } from "./qbittorrent.js";
+import { QBittorrentClient, type RawTorrent } from "./qbittorrent.js";
 
 const APP_VERSION = "0.1.0";
 
@@ -77,6 +77,7 @@ export type AppServices = {
   webSearch?: WebSearchProvider;
   config?: AppConfig;
   aiProvider?: CompatibleChatProvider;
+  history?: HistoryStore;
   pairing?: PairingService;
   sessions?: SessionStore;
   prowlarr?: ProwlarrService;
@@ -104,6 +105,15 @@ const discoveryActorParamsSchema = z.object({ actorId: discoveryItemIdSchema });
 const discoveryActorWorkParamsSchema = z.object({ actorId: discoveryItemIdSchema, workId: discoveryItemIdSchema });
 const discoveryMediaTypeSchema = z.enum(["movie", "tv"]);
 const discoveryMediaParamsSchema = z.object({ mediaType: discoveryMediaTypeSchema, itemId: discoveryItemIdSchema });
+const seenBodySchema = z.object({
+  mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+  mediaType: discoveryMediaTypeSchema,
+  title: z.string().trim().min(1).max(240),
+}).strict();
+const seenParamsSchema = z.object({
+  mediaType: discoveryMediaTypeSchema,
+  mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+});
 const discoveryQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(20).optional(),
@@ -230,6 +240,15 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     statusFilePath: config.nasStatusPath,
   });
   const discovery = services.discovery ?? new DiscoveryService(new DoubanClient(), prowlarr);
+  // Durable seen records and AI preferences are family-shared; without a data
+  // directory (hand-built test configs) the store stays in memory only.
+  const history = services.history ?? new HistoryStore({
+    path: config.dataDir ? join(config.dataDir, "history.json") : undefined,
+  });
+  const conversationStore = new ConversationStore(Date.now, {
+    preferences: () => history.preferences(),
+    seenIds: () => history.knownSeenIds(),
+  });
 
   const app = Fastify({
     logController: new LogController({ disableRequestLogging: true }),
@@ -698,8 +717,8 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
   });
   const assistant = aiProvider && discovery.searchMedia && discovery.getMedia && discovery.getMediaDetails && discovery.getMediaReleases
     ? config.aiWebEnabled
-      ? new WebRecommendationService(aiProvider, discovery as AssistantDiscovery, webSearch, { timeoutMs: config.aiTurnTimeoutMs })
-      : new AssistantService(aiProvider, discovery as AssistantDiscovery, { timeoutMs: config.aiTurnTimeoutMs }) : undefined;
+      ? new WebRecommendationService(aiProvider, discovery as AssistantDiscovery, webSearch, { timeoutMs: config.aiTurnTimeoutMs, history, store: conversationStore })
+      : new AssistantService(aiProvider, discovery as AssistantDiscovery, { timeoutMs: config.aiTurnTimeoutMs, history, store: conversationStore }) : undefined;
   app.addHook("onClose", async () => { assistant?.close(); });
   const aiFailure = (reply: FastifyReply, error: unknown) => {
     const failure = error instanceof AssistantError ? error : new AssistantError("AI_UNAVAILABLE");
@@ -900,6 +919,35 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     } catch {
       return genericUpstreamError(reply);
     }
+  });
+
+  app.get("/api/history", {
+    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    return reply.header("Cache-Control", "no-store").send(history.snapshot());
+  });
+
+  app.post("/api/history/seen", {
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    reply.header("Cache-Control", "no-store");
+    const parsed = seenBodySchema.safeParse(request.body);
+    if (!parsed.success) return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    history.markSeen({ ...parsed.data, markedAt: new Date().toISOString() });
+    return reply.send({ ok: true });
+  });
+
+  app.delete("/api/history/seen/:mediaType/:mediaId", {
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    reply.header("Cache-Control", "no-store");
+    const parsed = seenParamsSchema.safeParse(request.params);
+    if (!parsed.success) return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    history.unmarkSeen(parsed.data.mediaType, parsed.data.mediaId);
+    return reply.send({ ok: true });
   });
 
   app.get("/api/storage", {

@@ -1,5 +1,6 @@
 import { assistantModelOutputSchema, assistantTurnResponseSchema, type AssistantTurnRequest, type AssistantTurnResponse, type AssistantUsage } from '../../shared/assistant.js';
 import { ConversationStore, AssistantError, type Turn } from './conversation-store.js';
+import { buildSeenTitleIndex, type HistoryStore } from '../history-store.js';
 import { ProviderError, type CompatibleChatProvider, type AssistantMessage } from './provider.js';
 import { ToolRunner, toolDefinitions, updatePreferences, type AssistantDiscovery } from './tools.js';
 import { buildRecommendationCard, filterCandidateForPreferences } from './recommendation.js';
@@ -22,7 +23,7 @@ function safeReason(text: string): string {
 }
 export class AssistantService {
   readonly store: ConversationStore;
-  constructor(readonly provider: CompatibleChatProvider, readonly discovery: AssistantDiscovery, readonly options: {store?: ConversationStore; timeoutMs?: number} = {}) {
+  constructor(readonly provider: CompatibleChatProvider, readonly discovery: AssistantDiscovery, readonly options: {store?: ConversationStore; timeoutMs?: number; history?: HistoryStore} = {}) {
     this.store = options.store ?? new ConversationStore();
   }
   cancel(owner:string,id:string) { this.store.cancel(owner,id); }
@@ -42,6 +43,7 @@ export class AssistantService {
       const result = await Promise.race([this.execute(turn,request.message),aborted]);
       turn.result=result;
       turn.conversation.history.push({user:request.message,response:result});
+      this.options.history?.savePreferences(turn.conversation.preferences, buildSeenTitleIndex(turn.conversation));
       return result;
     } catch(e) {
       turn.failed=true; turn.conversation.preferences=previousPrefs;
@@ -145,6 +147,7 @@ export class AssistantService {
         }
         throw error;
       }
+      return;
     }));
     const recommendations=[];
     for(const key of [...new Set(keys)].slice(0,5)) {

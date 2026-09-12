@@ -26,6 +26,7 @@ services:
       PT_MEDIA_NAS_SENTINEL: .pt-media-assistant-mounted
       PT_MEDIA_NAS_SENTINEL_PATH: /run/pt-media-nas-sentinel
       PT_MEDIA_NAS_STATUS_PATH: /run/pt-media-nas-status
+      PT_MEDIA_DATA_DIR: /data
     secrets:
       - source: prowlarr_api_key
         target: prowlarr_api_key
@@ -44,6 +45,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - pt-media-data:/data
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
@@ -65,3 +67,6 @@ secrets:
     file: ./.data/orbstack/prowlarr_api_key
   prowlarr_proxy_token:
     file: ./.data/orbstack/prowlarr_proxy_token
+
+volumes:
+  pt-media-data:

@@ -26,6 +26,7 @@ services:
       PT_MEDIA_NAS_CHECK_MODE: sentinel
       PT_MEDIA_NAS_SENTINEL: "${PT_MEDIA_NAS_SENTINEL:-.pt-media-assistant-mounted}"
       PT_MEDIA_NAS_SENTINEL_PATH: /run/pt-media-nas-sentinel
+      PT_MEDIA_DATA_DIR: /data
     secrets:
       - source: prowlarr_api_key
         target: prowlarr_api_key
@@ -36,6 +37,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - pt-media-data:/data
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
@@ -82,3 +84,7 @@ services:
 secrets:
   prowlarr_api_key:
     file: "${PROWLARR_API_KEY_FILE:-/srv/app/pt-media-assistant/secrets/prowlarr_api_key}"
+
+volumes:
+  # Family-shared seen records and AI preferences survive app re-creation.
+  pt-media-data:

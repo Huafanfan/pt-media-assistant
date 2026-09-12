@@ -1,4 +1,4 @@
-import { Circle, CircleDashed, CircleDot, RefreshCw, Star, X } from "lucide-react";
+import { Circle, CircleDashed, CircleDot, Eye, EyeOff, RefreshCw, Star, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DiscoveryActor, DiscoveryItemDetails, DiscoveryMedia, DiscoveryReleaseResponse, ReleaseSummary } from "../../shared/contracts";
 import { DiscoveryPoster } from "./DiscoveryPoster";
@@ -20,6 +20,9 @@ export type MediaInspectorProps = {
   onRetry: () => void;
   onRetryDetails: () => void;
   onSelectActor?: (actor: DiscoveryActor) => void;
+  seen?: boolean;
+  seenPending?: boolean;
+  onToggleSeen?: () => void;
 };
 
 const RELEASE_PAGE_SIZE = 10;
@@ -64,7 +67,10 @@ export function MediaInspector({
   onClose,
   onRetry,
   onRetryDetails,
-  onSelectActor
+  onSelectActor,
+  seen = false,
+  seenPending = false,
+  onToggleSeen
 }: MediaInspectorProps) {
   const itemHeading = item?.title ?? "候选片源";
   const hasResponse = Boolean(releaseResponse && !error);
@@ -128,6 +134,21 @@ export function MediaInspector({
                   </div>
                   <p>{item.genres.length > 0 ? item.genres.join(" / ") : "未分类"}</p>
                   <p className="discovery-selected-item-summary">{item.summary || "暂无简介"}</p>
+                  {onToggleSeen ? (
+                    <div className="discovery-seen-row">
+                      <button
+                        className={`outline-button discovery-seen-button${seen ? " is-seen" : ""}`}
+                        type="button"
+                        onClick={onToggleSeen}
+                        disabled={seenPending}
+                        aria-pressed={seen}
+                      >
+                        {seen ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                        {seenPending ? "正在更新…" : seen ? "取消已看" : "标记已看"}
+                      </button>
+                      {seen ? <span className="discovery-seen-note">已看过的作品不会再被 AI 推荐</span> : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <section className="discovery-cast" aria-label="演职员">

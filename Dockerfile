@@ -21,6 +21,11 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
+# Durable state (seen records and AI preferences) lives on a writable volume.
+# Docker initializes a fresh named volume from this directory, including the
+# node ownership, so the non-root process can write without extra setup.
+RUN install -d -o node -g node -m 700 /data
+
 USER node
 EXPOSE 4178
 

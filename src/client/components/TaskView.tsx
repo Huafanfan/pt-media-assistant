@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CircleAlert, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
-import type { TorrentAction, TorrentSummary } from "../../shared/contracts";
+import type { SeenMediaEntry, TorrentAction, TorrentSummary } from "../../shared/contracts";
 import { formatEta, formatRate, isPausedTorrent, torrentStateLabel } from "../torrent-format";
 import { formatBytes } from "./ReleaseList";
 import { LoadingState } from "./States";
@@ -105,7 +105,11 @@ export function TaskView({
   actionError,
   actionPending,
   onRefresh,
-  onAction
+  onAction,
+  seenItems = [],
+  seenError = null,
+  seenPendingKey = null,
+  onUnmarkSeen
 }: {
   torrents: TorrentSummary[];
   loading: boolean;
@@ -114,6 +118,10 @@ export function TaskView({
   actionPending: boolean;
   onRefresh: () => void;
   onAction: (action: TorrentAction, hashes: string[]) => Promise<boolean>;
+  seenItems?: SeenMediaEntry[];
+  seenError?: string | null;
+  seenPendingKey?: string | null;
+  onUnmarkSeen?: (entry: SeenMediaEntry) => void;
 }) {
   const [filter, setFilter] = useState<TaskFilter>("all");
   const [confirmHash, setConfirmHash] = useState<string | null>(null);
@@ -177,6 +185,39 @@ export function TaskView({
           />
         ))}
       </ul>
+
+      {seenItems.length > 0 || seenError ? (
+        <section className="seen-records" aria-label="已看记录">
+          <header className="task-view-heading">
+            <div>
+              <h2>已看记录</h2>
+              <p>已看过的作品不会再被 AI 推荐（家庭共享）。</p>
+            </div>
+          </header>
+          {seenError ? <p className="inline-error" role="alert">{seenError}</p> : null}
+          {seenItems.length > 0 ? (
+            <ul className="seen-list">
+              {seenItems.map((entry) => {
+                const key = `${entry.mediaType}:${entry.mediaId}`;
+                return (
+                  <li key={key}>
+                    <span className="seen-title">{entry.title}</span>
+                    <span className="seen-meta">{entry.mediaType === "tv" ? "剧集" : "电影"}</span>
+                    <button
+                      className="text-button"
+                      type="button"
+                      disabled={seenPendingKey === key}
+                      onClick={() => onUnmarkSeen?.(entry)}
+                    >
+                      {seenPendingKey === key ? "正在更新…" : "取消已看"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
     </section>
   );
 }

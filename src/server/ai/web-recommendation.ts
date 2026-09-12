@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { assistantContentKindSchema, assistantPreferencesPatchSchema, assistantTurnResponseSchema, defaultAssistantPreferences, type AssistantPreferences, type AssistantRecommendationCard, type AssistantTurnRequest, type AssistantTurnResponse, type AssistantWarning } from '../../shared/assistant.js';
 import { AssistantError, ConversationStore, type Turn } from './conversation-store.js';
+import { buildSeenTitleIndex, type HistoryStore } from '../history-store.js';
 import { ProviderError, type CompatibleChatProvider } from './provider.js';
 import { ToolRunner, updatePreferences, type AssistantDiscovery } from './tools.js';
 import { buildRecommendationCard } from './recommendation.js';
@@ -77,8 +78,12 @@ function needsHardEvidence(card: AssistantRecommendationCard, prefs: AssistantPr
 export class WebRecommendationService {
   readonly store: ConversationStore;
   constructor(readonly provider: CompatibleChatProvider, readonly discovery: AssistantDiscovery, readonly search: WebSearchProvider,
-    readonly options: { store?: ConversationStore; timeoutMs?: number } = {}) {
+    readonly options: { store?: ConversationStore; timeoutMs?: number; history?: HistoryStore } = {}) {
     this.store = options.store ?? new ConversationStore();
+  }
+  /** Persist preferences and any newly seen titles after a turn. */
+  private persistConversation(turn: Turn): void {
+    this.options.history?.savePreferences(turn.conversation.preferences, buildSeenTitleIndex(turn.conversation));
   }
   cancel(owner: string, id: string) { this.store.cancel(owner, id); }
   remove(owner: string, id: string) { this.store.remove(owner, id); }
@@ -109,6 +114,7 @@ export class WebRecommendationService {
       } : undefined, onMetric), aborted]);
       turn.result = result;
       turn.conversation.history.push({ user: request.message, response: result });
+      this.persistConversation(turn);
       return result;
     } catch (error) {
       turn.failed = true;
@@ -118,6 +124,7 @@ export class WebRecommendationService {
         // resolve against what the user saw, including unverified source IDs.
         turn.conversation.preferences = published.preferences;
         turn.conversation.history.push({ user: request.message, response: { ...published, phase: 'complete' } });
+        this.persistConversation(turn);
       } else {
         turn.conversation.preferences = previous;
         turn.conversation.seenSourceTitles = previousSeenTitles;
@@ -276,6 +283,7 @@ export class WebRecommendationService {
         signal.throwIfAborted();
         warnings.push({ code: 'METADATA_UNAVAILABLE', message: '部分作品详情暂未核实，可先查看来源。' });
       }
+      return;
     }));
     signal.throwIfAborted();
     usage.toolExecutions += runner.executions;

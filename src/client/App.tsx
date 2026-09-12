@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DiscoveryActor,
   DiscoveryActorWork,
@@ -9,6 +9,7 @@ import type {
   GrabResponse,
   ReleaseSummary,
   SearchResponse,
+  SeenMediaEntry,
   TorrentAction
 } from "../shared/contracts";
 import type { AssistantRecommendationCard } from "../shared/assistant";
@@ -162,6 +163,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [grabResult, setGrabResult] = useState<GrabResponse | null>(null);
   const [taskActionPending, setTaskActionPending] = useState(false);
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
+  const [historySeen, setHistorySeen] = useState<SeenMediaEntry[]>([]);
+  const [seenPendingKey, setSeenPendingKey] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const assistant = useAssistant(client, csrfToken, paired);
   const [assistantSelectedCard, setAssistantSelectedCard] = useState<AssistantRecommendationCard | null>(null);
   const [assistantReleaseResponses, setAssistantReleaseResponses] = useState<Record<string, DiscoveryReleaseResponse>>({});
@@ -212,6 +216,66 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   ) : null;
   const refreshAllStatus = () => {
     void Promise.allSettled([bootstrap.refreshHealth(), runtime.refresh()]);
+  };
+
+  // The seen list is family-shared durable state; it is loaded once per
+  // authenticated session and updated optimistically after each mutation.
+  useEffect(() => {
+    if (!paired || !csrfToken || !client.getHistory) return;
+    let cancelled = false;
+    void client.getHistory(csrfToken)
+      .then((history) => {
+        if (cancelled) return;
+        setHistorySeen(history.seen);
+        setHistoryError(null);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setHistoryError(readableError(error));
+      });
+    return () => { cancelled = true; };
+  }, [client, csrfToken, paired]);
+
+  const seenKeys = useMemo(
+    () => new Set(historySeen.map((entry) => `${entry.mediaType}:${entry.mediaId}`)),
+    [historySeen]
+  );
+
+  const toggleSeen = async (media: DiscoveryMedia): Promise<void> => {
+    if (!csrfToken || !client.markSeen || !client.unmarkSeen || seenPendingKey) return;
+    const key = `${media.mediaType}:${media.id}`;
+    setSeenPendingKey(key);
+    setHistoryError(null);
+    try {
+      if (seenKeys.has(key)) {
+        await client.unmarkSeen(media.mediaType, media.id, csrfToken);
+        setHistorySeen((current) => current.filter((entry) => `${entry.mediaType}:${entry.mediaId}` !== key));
+      } else {
+        await client.markSeen({ mediaId: media.id, mediaType: media.mediaType, title: media.title }, csrfToken);
+        setHistorySeen((current) => [
+          { mediaId: media.id, mediaType: media.mediaType, title: media.title, markedAt: new Date().toISOString() },
+          ...current.filter((entry) => `${entry.mediaType}:${entry.mediaId}` !== key)
+        ]);
+      }
+    } catch (error) {
+      setHistoryError(readableError(error));
+    } finally {
+      setSeenPendingKey(null);
+    }
+  };
+
+  const unmarkSeenEntry = async (entry: SeenMediaEntry): Promise<void> => {
+    if (!csrfToken || !client.unmarkSeen || seenPendingKey) return;
+    const key = `${entry.mediaType}:${entry.mediaId}`;
+    setSeenPendingKey(key);
+    setHistoryError(null);
+    try {
+      await client.unmarkSeen(entry.mediaType, entry.mediaId, csrfToken);
+      setHistorySeen((current) => current.filter((item) => `${item.mediaType}:${item.mediaId}` !== key));
+    } catch (error) {
+      setHistoryError(readableError(error));
+    } finally {
+      setSeenPendingKey(null);
+    }
   };
 
   const handleTorrentAction = async (action: TorrentAction, hashes: string[]): Promise<boolean> => {
@@ -675,6 +739,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
         onRetry={retryDiscoveryItem}
         onRetryDetails={retryDiscoveryDetails}
         onSelectActor={handleSelectActor}
+        seen={seenKeys.has(`${selectedMediaItem.mediaType}:${selectedMediaItem.id}`)}
+        seenPending={seenPendingKey === `${selectedMediaItem.mediaType}:${selectedMediaItem.id}`}
+        onToggleSeen={() => void toggleSeen(selectedMediaItem)}
       />
     </div>
   ) : null;
@@ -811,6 +878,10 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
               actionPending={taskActionPending}
               onRefresh={() => void runtime.refresh(true)}
               onAction={handleTorrentAction}
+              seenItems={historySeen}
+              seenError={historyError}
+              seenPendingKey={seenPendingKey}
+              onUnmarkSeen={(entry) => void unmarkSeenEntry(entry)}
             />
           </section>
         ) : mode === "assistant" ? (

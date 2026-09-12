@@ -6,8 +6,12 @@ import { resolve } from "node:path";
 
 export async function startServer(): Promise<{ close: () => Promise<void> }> {
   const config = loadConfig();
+  // Native runs keep durable state under the git-ignored .data directory; the
+  // container deployment sets PT_MEDIA_DATA_DIR=/data explicitly. Only the
+  // process entry point applies this default so test configs stay in memory.
+  const dataDir = config.dataDir ?? resolve(process.cwd(), ".data", "app");
   const pairing = new PairingService({ pairingCode: config.pairingCode || undefined });
-  const app = await createApp({ config, pairing });
+  const app = await createApp({ config: { ...config, dataDir }, pairing });
   await app.listen({ host: config.host, port: config.port });
 
   if (!config.trustLan) {

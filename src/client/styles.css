@@ -1429,6 +1429,13 @@ textarea:focus-visible {
 .task-actions .outline-button { min-height:38px;padding:5px 12px;font-size:0.8rem; }
 .task-confirm-note { display:inline-flex;align-items:center;gap:6px;color:#d0a15a;font-size:0.76rem; }
 .task-remove { color:#d98b7a; }
+.seen-records { margin-top:26px;padding-top:18px;border-top:1px solid var(--border); }
+.seen-records h2 { margin:0;font-size:1.05rem;font-weight:620; }
+.seen-list { display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none; }
+.seen-list li { display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface); }
+.seen-title { flex:1 1 auto;min-width:0;overflow:hidden;font-size:0.86rem;text-overflow:ellipsis;white-space:nowrap; }
+.seen-meta { flex:0 0 auto;color:var(--faint);font-size:0.72rem; }
+.seen-list .text-button { flex:0 0 auto;min-height:38px;font-size:0.78rem; }
 @media (max-width: 899px) {
  .task-pane { width:100%;overflow:visible; }
 }

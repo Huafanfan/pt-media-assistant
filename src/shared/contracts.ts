@@ -1,3 +1,5 @@
+import type { AssistantPreferences } from "./assistant.js";
+
 export type ServiceHealth = {
   status: "ok" | "degraded";
   version: string;
@@ -195,6 +197,25 @@ export type TorrentActionRequest = {
 };
 
 export type TorrentActionResponse = { ok: boolean };
+
+/** Family-shared durable state exposed to the browser. */
+export type SeenMediaEntry = {
+  mediaId: string;
+  mediaType: "movie" | "tv";
+  title: string;
+  markedAt: string;
+};
+
+export type HistoryResponse = {
+  seen: SeenMediaEntry[];
+  preferences: AssistantPreferences;
+};
+
+export type MarkSeenRequest = {
+  mediaId: string;
+  mediaType: "movie" | "tv";
+  title: string;
+};
 
 export type ApiErrorBody = {
   error: string;

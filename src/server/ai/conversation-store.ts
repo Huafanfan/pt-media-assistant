@@ -13,17 +13,23 @@ export type Conversation = {
   seenSourceTitles?: string[];
   topic?: string;
   active?: string;
+  /** Persisted seen IDs that stay valid even when no candidate is in memory. */
+  knownSeen?: Set<string>;
 };
 export type Turn = {
   id: string; clientTurnId: string; owner: string; requestKey?: string; conversation: Conversation; controller: AbortController;
   createdAt: number; result?: AssistantTurnResponse; failed?: boolean;
+};
+type ConversationSeed = {
+  preferences: () => AssistantPreferences;
+  seenIds: () => Set<string>;
 };
 export class ConversationStore {
   readonly conversations = new Map<string, Conversation>();
   readonly turns = new Map<string, Turn>();
   private clientIds = new Map<string, string>();
   private starts: Array<{ owner: string; at: number }> = [];
-  constructor(readonly now: () => number = Date.now) {}
+  constructor(readonly now: () => number = Date.now, readonly seed?: ConversationSeed) {}
   private cleanup() {
     const now = this.now();
     for (const [id, turn] of this.turns) if (!turn.conversation.active && now - turn.createdAt >= 30 * 60_000) { this.turns.delete(id); this.clientIds.delete(`${turn.owner}:${turn.clientTurnId}`); }
@@ -51,7 +57,9 @@ export class ConversationStore {
         if (!oldest) throw new AssistantError('AI_BUDGET_EXCEEDED', 429);
         this.remove(oldest.owner, oldest.id);
       }
-      c = { id: randomUUID(), owner, touched: this.now(), preferences: defaultAssistantPreferences(), candidates: new Map(), history: [] };
+      c = { id: randomUUID(), owner, touched: this.now(), preferences: this.seed?.preferences() ?? defaultAssistantPreferences(), candidates: new Map(), history: [] };
+      const knownSeen = this.seed?.seenIds();
+      if (knownSeen && knownSeen.size > 0) c.knownSeen = knownSeen;
       this.conversations.set(c.id, c);
     }
     if (c.history.length >= 20) throw new AssistantError('CONVERSATION_EXPIRED', 409);

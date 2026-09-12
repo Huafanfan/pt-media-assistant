@@ -94,4 +94,15 @@ describe("下载任务视图", () => {
     renderView({ torrents: [] });
     expect(screen.getByText("qBittorrent 里还没有任务。")).toBeInTheDocument();
   });
+
+  it("lists family-shared seen records and can unmark them", async () => {
+    const user = userEvent.setup();
+    const onUnmarkSeen = vi.fn();
+    const entry = { mediaId: "1293000", mediaType: "movie" as const, title: "星际穿越", markedAt: "2026-09-12T10:00:00.000Z" };
+    renderView({ seenItems: [entry], onUnmarkSeen });
+
+    expect(screen.getByRole("heading", { name: "已看记录" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消已看" }));
+    expect(onUnmarkSeen).toHaveBeenCalledWith(entry);
+  });
 });
