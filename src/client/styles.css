@@ -1462,6 +1462,10 @@ textarea:focus-visible {
  .assistant-card { padding:14px; }
  .assistant-card-heading { gap:8px;flex-wrap:wrap; }
  .assistant-thread { max-height:32vh; }
-  .assistant-toolbar,.assistant-preferences { padding-inline:14px; }
- .mode-switch button { padding-inline:8px;gap:6px;font-size:0.84rem; }
+   .assistant-toolbar,.assistant-preferences { padding-inline:14px; }
+  .mode-switch button { padding-inline:8px;gap:6px;font-size:0.84rem; }
+}
+@media(max-width:430px) {
+ .mode-switch button { padding-inline:5px;gap:4px;font-size:0.78rem; }
+ .mode-switch button svg { width:15px;height:15px; }
 }
