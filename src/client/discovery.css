@@ -546,6 +546,25 @@
   accent-color: var(--discovery-copper);
 }
 
+.discovery-filter-reset {
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 1px solid var(--discovery-divider);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--discovery-muted);
+  font-size: 0.72rem;
+}
+
+.discovery-filter-reset:not(:disabled):hover {
+  border-color: var(--discovery-copper);
+  color: var(--discovery-copper);
+}
+
+.discovery-filter-reset:disabled {
+  opacity: 0.5;
+}
+
 .discovery-inspector-empty {
   padding: 28px 22px;
   color: var(--discovery-muted);

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { DiscoveryItem, DiscoveryReleaseResponse, ReleaseSummary } from "../../src/shared/contracts";
@@ -56,8 +56,8 @@ const response: DiscoveryReleaseResponse = {
   ]
 };
 
-function renderInspector(overrides: Partial<React.ComponentProps<typeof DiscoveryInspector>> = {}) {
-  const props: React.ComponentProps<typeof DiscoveryInspector> = {
+function inspectorProps(overrides: Partial<React.ComponentProps<typeof DiscoveryInspector>> = {}) {
+  return {
     item,
     details: null,
     detailsLoading: false,
@@ -72,7 +72,11 @@ function renderInspector(overrides: Partial<React.ComponentProps<typeof Discover
     onRetry: vi.fn(),
     onRetryDetails: vi.fn(),
     ...overrides
-  };
+  } satisfies React.ComponentProps<typeof DiscoveryInspector>;
+}
+
+function renderInspector(overrides: Partial<React.ComponentProps<typeof DiscoveryInspector>> = {}) {
+  const props = inspectorProps(overrides);
   render(<DiscoveryInspector {...props} />);
   return props;
 }
@@ -179,5 +183,63 @@ describe("DiscoveryInspector", () => {
 
     await user.selectOptions(screen.getByRole("combobox", { name: /分辨率/ }), "720p");
     expect(screen.getByText("没有符合筛选的候选")).toBeInTheDocument();
+  });
+
+  it("resets filters and sorting when the selected work changes", async () => {
+    const user = userEvent.setup();
+    const candidates = [
+      release({ id: "s1", title: "Show S01 1080p", season: 1, resolution: "1080p", seeders: 10, size: 10 * 1024 ** 3 }),
+      release({ id: "s2", title: "Show S02 2160p", season: 2, resolution: "2160p", seeders: 50, size: 30 * 1024 ** 3 }),
+    ];
+    cleanup();
+    const props = inspectorProps({ releaseResponse: { ...response, total: candidates.length, releases: candidates } });
+    const { rerender } = render(<DiscoveryInspector {...props} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /季/ }), "2");
+    await user.selectOptions(screen.getByRole("combobox", { name: /排序/ }), "seeders");
+    expect(screen.queryByText("Show S01 1080p")).not.toBeInTheDocument();
+
+    rerender(<DiscoveryInspector {...props} item={{ ...item, id: "subject-9", title: "另一部剧" }} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /季/ })).toHaveValue("all"));
+    expect(screen.getByRole("combobox", { name: /排序/ })).toHaveValue("default");
+    expect(screen.getByText("Show S01 1080p")).toBeInTheDocument();
+  });
+
+  it("clears a selected option when a refresh no longer offers it", async () => {
+    const user = userEvent.setup();
+    cleanup();
+    const props = inspectorProps({
+      releaseResponse: { ...response, total: 2, releases: [
+        release({ id: "c1", title: "H264 candidate", codec: "H.264" }),
+        release({ id: "c2", title: "H265 candidate", codec: "H.265" }),
+      ] },
+    });
+    const { rerender } = render(<DiscoveryInspector {...props} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /编码/ }), "H.265");
+    expect(screen.getByText("H265 candidate")).toBeInTheDocument();
+    expect(screen.queryByText("H264 candidate")).not.toBeInTheDocument();
+
+    rerender(<DiscoveryInspector {...props} releaseResponse={{ ...response, total: 1, releases: [release({ id: "c3", title: "Only H264", codec: "H.264" })] }} />);
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: /编码/ })).not.toBeInTheDocument());
+    expect(screen.getByText("Only H264")).toBeInTheDocument();
+  });
+
+  it("clears filters and sorting with the reset control", async () => {
+    const user = userEvent.setup();
+    const candidates = [
+      release({ id: "s1", title: "Show S01 1080p", season: 1 }),
+      release({ id: "s2", title: "Show S02 2160p", season: 2, resolution: "2160p" }),
+    ];
+    cleanup();
+    renderInspector({ releaseResponse: { ...response, total: candidates.length, releases: candidates } });
+
+    const reset = screen.getByRole("button", { name: "清除筛选" });
+    expect(reset).toBeDisabled();
+    await user.selectOptions(screen.getByRole("combobox", { name: /季/ }), "2");
+    expect(reset).toBeEnabled();
+    await user.click(reset);
+    expect(screen.getByRole("combobox", { name: /季/ })).toHaveValue("all");
+    expect(screen.getByText("Show S01 1080p")).toBeInTheDocument();
   });
 });

@@ -56,6 +56,16 @@ function releaseAccessibilityName(release: ReleaseSummary, selected: boolean): s
   return details.join("，");
 }
 
+const DEFAULT_RELEASE_FILTERS: ReleaseFilters = { season: "all", resolution: "all", codec: "all", indexer: "all", freeleech: false };
+
+function equalFilters(left: ReleaseFilters, right: ReleaseFilters): boolean {
+  return left.season === right.season
+    && left.resolution === right.resolution
+    && left.codec === right.codec
+    && left.indexer === right.indexer
+    && left.freeleech === right.freeleech;
+}
+
 function statusSummary(response: DiscoveryReleaseResponse): string {
   if (response.status === "available") return `有资源 ${response.total}`;
   if (response.status === "possible") return `可能匹配 ${response.total}`;
@@ -85,7 +95,7 @@ export function MediaInspector({
   const hasResponse = Boolean(releaseResponse && !error);
   const releases = releaseResponse?.releases ?? [];
   const [releasePage, setReleasePage] = useState(1);
-  const [releaseFilters, setReleaseFilters] = useState<ReleaseFilters>({ season: "all", resolution: "all", codec: "all", indexer: "all", freeleech: false });
+  const [releaseFilters, setReleaseFilters] = useState<ReleaseFilters>(DEFAULT_RELEASE_FILTERS);
   const [releaseSort, setReleaseSort] = useState<ReleaseSort>("default");
 
   const seasonOptions = useMemo(
@@ -95,22 +105,37 @@ export function MediaInspector({
   const resolutionOptions = useMemo(() => [...new Set(releases.flatMap((release) => (release.resolution ? [release.resolution] : [])))], [releases]);
   const codecOptions = useMemo(() => [...new Set(releases.flatMap((release) => (release.codec ? [release.codec] : [])))], [releases]);
   const indexerOptions = useMemo(() => [...new Set(releases.map((release) => release.indexer).filter(Boolean))].sort((left, right) => left.localeCompare(right)), [releases]);
+
+  // Drop a selected value when the current snapshot no longer offers it, so
+  // a refresh can never leave the list filtered by an invisible control.
+  const effectiveFilters = useMemo<ReleaseFilters>(() => ({
+    season: releaseFilters.season === "all" || seasonOptions.includes(Number(releaseFilters.season)) ? releaseFilters.season : "all",
+    resolution: releaseFilters.resolution === "all" || resolutionOptions.includes(releaseFilters.resolution) ? releaseFilters.resolution : "all",
+    codec: releaseFilters.codec === "all" || codecOptions.includes(releaseFilters.codec) ? releaseFilters.codec : "all",
+    indexer: releaseFilters.indexer === "all" || indexerOptions.includes(releaseFilters.indexer) ? releaseFilters.indexer : "all",
+    freeleech: releaseFilters.freeleech,
+  }), [releaseFilters, seasonOptions, resolutionOptions, codecOptions, indexerOptions]);
+
+  useEffect(() => {
+    setReleaseFilters((current) => (equalFilters(current, effectiveFilters) ? current : effectiveFilters));
+  }, [effectiveFilters]);
+
   // Filtering and sorting are local to the bounded server snapshot; no extra
   // PT request is created by changing a control.
   const sortedReleases = useMemo(() => {
     const filtered = releases.filter((release) => {
-      if (releaseFilters.season !== "all" && String(release.season ?? "") !== releaseFilters.season) return false;
-      if (releaseFilters.resolution !== "all" && release.resolution !== releaseFilters.resolution) return false;
-      if (releaseFilters.codec !== "all" && release.codec !== releaseFilters.codec) return false;
-      if (releaseFilters.indexer !== "all" && release.indexer !== releaseFilters.indexer) return false;
-      if (releaseFilters.freeleech && !(release.freeleech || release.freeleechState === "yes")) return false;
+      if (effectiveFilters.season !== "all" && String(release.season ?? "") !== effectiveFilters.season) return false;
+      if (effectiveFilters.resolution !== "all" && release.resolution !== effectiveFilters.resolution) return false;
+      if (effectiveFilters.codec !== "all" && release.codec !== effectiveFilters.codec) return false;
+      if (effectiveFilters.indexer !== "all" && release.indexer !== effectiveFilters.indexer) return false;
+      if (effectiveFilters.freeleech && !(release.freeleech || release.freeleechState === "yes")) return false;
       return true;
     });
     if (releaseSort === "seeders") return [...filtered].sort((left, right) => right.seeders - left.seeders);
     if (releaseSort === "size") return [...filtered].sort((left, right) => left.size - right.size);
     if (releaseSort === "newest") return [...filtered].sort((left, right) => left.ageDays - right.ageDays);
     return filtered;
-  }, [releases, releaseFilters, releaseSort]);
+  }, [releases, effectiveFilters, releaseSort]);
 
   const releaseTotal = sortedReleases.length;
   const releasePageCount = Math.max(1, Math.ceil(releaseTotal / RELEASE_PAGE_SIZE));
@@ -118,10 +143,18 @@ export function MediaInspector({
   const releaseStart = (activeReleasePage - 1) * RELEASE_PAGE_SIZE;
   const visibleReleases = sortedReleases.slice(releaseStart, releaseStart + RELEASE_PAGE_SIZE);
   const releaseEnd = releaseStart + visibleReleases.length;
+  const filtersActive = !equalFilters(effectiveFilters, DEFAULT_RELEASE_FILTERS) || releaseSort !== "default";
+
+  // A different work always starts with a clean filter state and page.
+  useEffect(() => {
+    setReleaseFilters(DEFAULT_RELEASE_FILTERS);
+    setReleaseSort("default");
+    setReleasePage(1);
+  }, [item?.mediaType, item?.id]);
 
   useEffect(() => {
     setReleasePage(1);
-  }, [item?.id, releaseFilters, releaseSort]);
+  }, [item?.mediaType, item?.id, effectiveFilters, releaseSort]);
 
   useEffect(() => {
     if (releasePage > releasePageCount) setReleasePage(releasePageCount);
@@ -286,7 +319,7 @@ export function MediaInspector({
                       <label className="discovery-filter">
                         <span>季（推断）</span>
                         <select
-                          value={releaseFilters.season}
+                          value={effectiveFilters.season}
                           title="季信息由发布标题推断，仅用于筛选，不代表已确认季集匹配"
                           onChange={(event) => setReleaseFilters((current) => ({ ...current, season: event.target.value }))}
                         >
@@ -298,7 +331,7 @@ export function MediaInspector({
                     {resolutionOptions.length > 1 ? (
                       <label className="discovery-filter">
                         <span>分辨率</span>
-                        <select value={releaseFilters.resolution} onChange={(event) => setReleaseFilters((current) => ({ ...current, resolution: event.target.value }))}>
+                        <select value={effectiveFilters.resolution} onChange={(event) => setReleaseFilters((current) => ({ ...current, resolution: event.target.value }))}>
                           <option value="all">全部</option>
                           {resolutionOptions.map((resolution) => <option key={resolution} value={resolution}>{resolution}</option>)}
                         </select>
@@ -307,7 +340,7 @@ export function MediaInspector({
                     {codecOptions.length > 1 ? (
                       <label className="discovery-filter">
                         <span>编码</span>
-                        <select value={releaseFilters.codec} onChange={(event) => setReleaseFilters((current) => ({ ...current, codec: event.target.value }))}>
+                        <select value={effectiveFilters.codec} onChange={(event) => setReleaseFilters((current) => ({ ...current, codec: event.target.value }))}>
                           <option value="all">全部</option>
                           {codecOptions.map((codec) => <option key={codec} value={codec}>{codec}</option>)}
                         </select>
@@ -316,7 +349,7 @@ export function MediaInspector({
                     {indexerOptions.length > 1 ? (
                       <label className="discovery-filter">
                         <span>索引器</span>
-                        <select value={releaseFilters.indexer} onChange={(event) => setReleaseFilters((current) => ({ ...current, indexer: event.target.value }))}>
+                        <select value={effectiveFilters.indexer} onChange={(event) => setReleaseFilters((current) => ({ ...current, indexer: event.target.value }))}>
                           <option value="all">全部</option>
                           {indexerOptions.map((indexer) => <option key={indexer} value={indexer}>{indexer}</option>)}
                         </select>
@@ -339,6 +372,14 @@ export function MediaInspector({
                         <option value="newest">最新</option>
                       </select>
                     </label>
+                    <button
+                      className="discovery-filter-reset"
+                      type="button"
+                      disabled={!filtersActive}
+                      onClick={() => { setReleaseFilters(DEFAULT_RELEASE_FILTERS); setReleaseSort("default"); }}
+                    >
+                      清除筛选
+                    </button>
                   </div>
                   {visibleReleases.length > 0 ? (
                     <>
