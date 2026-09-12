@@ -186,6 +186,16 @@ export type TorrentSummary = {
   savePath: string;
 };
 
+/** The browser can only pause, resume, or remove a task record. */
+export type TorrentAction = "pause" | "resume" | "remove";
+
+export type TorrentActionRequest = {
+  action: TorrentAction;
+  hashes: string[];
+};
+
+export type TorrentActionResponse = { ok: boolean };
+
 export type ApiErrorBody = {
   error: string;
   code?: string;

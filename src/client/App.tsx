@@ -8,7 +8,8 @@ import type {
   DiscoveryReleaseResponse,
   GrabResponse,
   ReleaseSummary,
-  SearchResponse
+  SearchResponse,
+  TorrentAction
 } from "../shared/contracts";
 import type { AssistantRecommendationCard } from "../shared/assistant";
 import { ApiError, apiClient, type ApiClient } from "./api";
@@ -28,6 +29,7 @@ import { ReleaseList, formatBytes } from "./components/ReleaseList";
 import { RuntimeStatusBar } from "./components/RuntimeSummary";
 import { EmptyState, LoadingState, OfflineState } from "./components/States";
 import { SelectionPanel } from "./components/SelectionPanel";
+import { TaskView } from "./components/TaskView";
 import { useRuntimeStatus } from "./hooks/useRuntimeStatus";
 import { useDiscovery } from "./hooks/useDiscovery";
 import { useDiscoveryActor } from "./hooks/useDiscoveryActor";
@@ -158,6 +160,8 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [grabResult, setGrabResult] = useState<GrabResponse | null>(null);
+  const [taskActionPending, setTaskActionPending] = useState(false);
+  const [taskActionError, setTaskActionError] = useState<string | null>(null);
   const assistant = useAssistant(client, csrfToken, paired);
   const [assistantSelectedCard, setAssistantSelectedCard] = useState<AssistantRecommendationCard | null>(null);
   const [assistantReleaseResponses, setAssistantReleaseResponses] = useState<Record<string, DiscoveryReleaseResponse>>({});
@@ -208,6 +212,25 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
   ) : null;
   const refreshAllStatus = () => {
     void Promise.allSettled([bootstrap.refreshHealth(), runtime.refresh()]);
+  };
+
+  const handleTorrentAction = async (action: TorrentAction, hashes: string[]): Promise<boolean> => {
+    if (!csrfToken || taskActionPending || !client.torrentAction) {
+      setTaskActionError("任务操作暂时不可用，请刷新后重试。");
+      return false;
+    }
+    setTaskActionPending(true);
+    setTaskActionError(null);
+    try {
+      const result = await client.torrentAction({ action, hashes }, csrfToken);
+      await runtime.refresh(false);
+      return result.ok;
+    } catch (error) {
+      setTaskActionError(readableError(error));
+      return false;
+    } finally {
+      setTaskActionPending(false);
+    }
   };
   const hasInspector = Boolean(selection || selectedMediaItem || selectedActorName);
 
@@ -377,9 +400,9 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
     if (!response || !assistantDownloadIntent(nextQuery)) return;
 
     const requestedIndex = assistantReferenceIndex(nextQuery);
-    const card = requestedIndex !== null
-      ? displayedCards[requestedIndex]
-      : displayedSelection;
+    const card = requestedIndex === null
+      ? displayedSelection
+      : displayedCards[requestedIndex];
     if (card) handleAssistantCard(card);
   };
 
@@ -745,7 +768,7 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
         onRefresh={refreshAllStatus}
         runtimeStatus={runtimeStatus}
       />
-      <main className={`app-layout ${mode === "discover" ? "is-discovery" : "search-shell"} ${hasInspector ? "has-inspector" : "no-inspector"}`}>
+      <main className={`app-layout ${mode === "discover" ? "is-discovery" : mode === "tasks" ? "is-tasks" : "search-shell"} ${hasInspector ? "has-inspector" : "no-inspector"}`}>
         {mode === "discover" ? (
           <>
             <section className="discovery-workspace" aria-label="发现影视">
@@ -774,6 +797,22 @@ export function App({ client = apiClient }: { client?: ApiClient } = {}) {
 
             {activeInspector}
           </>
+        ) : mode === "tasks" ? (
+          <section className="task-pane" aria-label="下载任务">
+            <div className="search-mode-toolbar">
+              <ModeSwitch mode={mode} onChange={handleModeChange} />
+            </div>
+            {healthError ? <p className="workspace-warning" role="status">{healthError}</p> : null}
+            <TaskView
+              torrents={runtime.torrents}
+              loading={runtime.torrentsLoading}
+              error={runtime.torrentsError}
+              actionError={taskActionError}
+              actionPending={taskActionPending}
+              onRefresh={() => void runtime.refresh(true)}
+              onAction={handleTorrentAction}
+            />
+          </section>
         ) : mode === "assistant" ? (
           <>
             <section className="chat-pane assistant-pane" aria-label="AI 推荐对话">

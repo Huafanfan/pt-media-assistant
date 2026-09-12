@@ -12,50 +12,11 @@ import {
 import type { GrabResponse, NasStorageSummary, TorrentSummary } from "../../shared/contracts";
 import { DESTINATION_PATH } from "../api";
 import type { SelectionState } from "../types";
+import { activeTorrents, formatEta, formatRate, torrentStateLabel } from "../torrent-format";
 import { formatBytes, formatCategories } from "./ReleaseList";
 
 function stateLabel(state: "started" | "stopped"): string {
   return state === "started" ? "已开始" : "已停止";
-}
-
-function torrentStateLabel(state: string): string {
-  const labels: Record<string, string> = {
-    downloading: "下载中",
-    forcedDL: "强制下载",
-    metaDL: "获取元数据",
-    checkingDL: "校验中",
-    stalledDL: "等待数据",
-    stoppedDL: "已暂停",
-    pausedDL: "已暂停",
-    queuedDL: "排队中"
-  };
-  return labels[state] ?? state;
-}
-
-function formatRate(bytesPerSecond: number): string {
-  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0 B/s";
-  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
-  let value = bytesPerSecond;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(unitIndex >= 2 ? 1 : 0)} ${units[unitIndex]}`;
-}
-
-function formatEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0 || seconds >= 8_640_000) return "未知";
-  if (seconds < 60) return `${Math.ceil(seconds)} 秒`;
-  if (seconds < 3_600) return `${Math.ceil(seconds / 60)} 分钟`;
-  return `${Math.ceil(seconds / 3_600)} 小时`;
-}
-
-function activeTorrents(torrents: TorrentSummary[]): TorrentSummary[] {
-  return torrents
-    .filter((torrent) => torrent.progress < 1 || /(?:DL|downloading|queued)/iu.test(torrent.state))
-    .sort((left, right) => right.downloadSpeed - left.downloadSpeed || left.name.localeCompare(right.name))
-    .slice(0, 3);
 }
 
 export function StorageMeter({

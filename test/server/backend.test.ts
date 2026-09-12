@@ -301,7 +301,7 @@ describe("Prowlarr search constraints", () => {
       "Movie 4K high-seed",
       "Movie 2160p low-seed",
     ]);
-    const requestHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
+    const requestHeaders = new Headers((fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined)?.headers);
     expect(requestHeaders.get("X-PT-Proxy-Token")).toBe("test-only-proxy-token");
   });
 });
@@ -310,7 +310,7 @@ describe("Fastify authentication and grab guard", () => {
   it("auto-creates a LAN session while retaining CSRF and exact-origin checks", async () => {
     const release = makeRelease();
     const prowlarr = {
-      search: vi.fn(async (intent: never) => ({ query: intent.searchTerm, intent, total: 0, elapsedMs: 0, releases: [] })),
+      search: vi.fn(async (intent: { searchTerm: string }) => ({ query: intent.searchTerm, intent, total: 0, elapsedMs: 0, releases: [] })),
       getRelease: vi.fn(() => release),
       grab: vi.fn(async () => undefined),
       check: vi.fn(async () => true),
@@ -319,6 +319,7 @@ describe("Fastify authentication and grab guard", () => {
       listTorrents: vi.fn(async () => []),
       duplicateForRelease: vi.fn(async () => false),
       check: vi.fn(async () => true),
+      torrentAction: vi.fn(async () => undefined),
     };
     const app = await createApp({
       config,
@@ -381,6 +382,7 @@ describe("Fastify authentication and grab guard", () => {
         listTorrents: vi.fn(async () => []),
         duplicateForRelease: vi.fn(async () => false),
         check: vi.fn(async () => true),
+        torrentAction: vi.fn(async () => undefined),
       },
       nas: readyNas,
       staticRoot: "/definitely-not-a-static-root",
@@ -412,6 +414,7 @@ describe("Fastify authentication and grab guard", () => {
         listTorrents: vi.fn(async () => []),
         duplicateForRelease: vi.fn(async () => false),
         check: vi.fn(async () => true),
+        torrentAction: vi.fn(async () => undefined),
       },
       nas: readyNas,
       staticRoot: "/definitely-not-a-static-root",

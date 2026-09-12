@@ -18,6 +18,8 @@ import type {
   SearchRequest,
   ServiceHealth,
   SessionResponse,
+  TorrentActionRequest,
+  TorrentActionResponse,
   TorrentSummary
 } from "../shared/contracts";
 import {
@@ -30,6 +32,15 @@ import {
 export const DESTINATION_PATH = "/Volumes/YourNAS/pt";
 
 type JsonRecord = Record<string, unknown>;
+
+/** Recursive JSON boundary value; callers narrow it with the type guards below. */
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export class ApiError extends Error {
   readonly status: number;
@@ -194,13 +205,13 @@ async function requestAssistantTurnStream(
   return completedSnapshot;
 }
 
-function parseJson(text: string): unknown {
+function parseJson(text: string): JsonValue | undefined {
   if (!text.trim()) {
     return undefined;
   }
 
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text) as JsonValue;
   } catch {
     return undefined;
   }
@@ -635,6 +646,7 @@ export type ApiClient = {
   grabPreview(releaseId: string, csrfToken: string): Promise<GrabPreviewResponse>;
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
+  torrentAction?(request: TorrentActionRequest, csrfToken: string): Promise<TorrentActionResponse>;
   getStorage(csrfToken: string): Promise<NasStorageSummary>;
   createAssistantTurnStream?(
     request: AssistantTurnRequest,
@@ -833,6 +845,17 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
           headers: withCsrf(csrfToken)
         }, fetchImpl)
       );
+    },
+
+    async torrentAction(request, csrfToken) {
+      // The response body is a boolean acknowledgement; requestJson already
+      // throws on any non-2xx status, so reaching this point means accepted.
+      await requestJson<unknown>("/api/torrents/actions", {
+        method: "POST",
+        headers: withCsrf(csrfToken),
+        body: JSON.stringify(request)
+      }, fetchImpl);
+      return { ok: true };
     },
 
     async getStorage(csrfToken) {

@@ -141,6 +141,7 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
     }),
     grab,
     getTorrents: vi.fn().mockResolvedValue([]),
+    torrentAction: vi.fn().mockResolvedValue({ ok: true }),
     getStorage: vi.fn().mockResolvedValue({
       path: "/Volumes/YourNAS/pt",
       mounted: true,
@@ -153,7 +154,7 @@ function makeClient({ paired = true, grab = vi.fn().mockResolvedValue({ accepted
   return client;
 }
 
-async function searchOnce(client: ApiClient) {
+async function searchOnce() {
   const user = userEvent.setup();
   await user.click(await screen.findByRole("tab", { name: "搜索" }));
   const input = await screen.findByPlaceholderText("输入电影或剧集名称");
@@ -295,7 +296,7 @@ describe("片源助手客户端", () => {
     const client = makeClient();
     render(<App client={client} />);
 
-    await searchOnce(client);
+    await searchOnce();
 
     expect(screen.getByRole("button", { name: "星际穿越，2014，电影" })).not.toBeNull();
     expect(screen.getByText("找到 1 部作品，选择作品查看详情和片源。")).not.toBeNull();
@@ -345,7 +346,7 @@ describe("片源助手客户端", () => {
       releases: [release]
     });
     render(<App client={client} />);
-    const user = await searchOnce(client);
+    const user = await searchOnce();
 
     await user.click(await screen.findByRole("button", { name: "星际穿越，2014，电影" }));
 
@@ -376,7 +377,7 @@ describe("片源助手客户端", () => {
       hasNext: false
     });
     render(<App client={client} />);
-    const user = await searchOnce(client);
+    const user = await searchOnce();
 
     await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
     await user.click(await screen.findByRole("button", { name: "演员甲" }));
@@ -394,7 +395,7 @@ describe("片源助手客户端", () => {
   it("previews on selection and only sends confirm:true after explicit grab", async () => {
     const client = makeClient();
     render(<App client={client} />);
-    const user = await searchOnce(client);
+    const user = await searchOnce();
 
     await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
     await screen.findByText(release.title);
@@ -413,7 +414,7 @@ describe("片源助手客户端", () => {
     const grab = vi.fn().mockRejectedValue(new ApiError("下载功能当前关闭。", 403, "GRAB_DISABLED"));
     const client = makeClient({ grab });
     render(<App client={client} />);
-    const user = await searchOnce(client);
+    const user = await searchOnce();
 
     await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
     await screen.findByText(release.title);
@@ -436,7 +437,7 @@ describe("片源助手客户端", () => {
       initialState: "stopped"
     });
     render(<App client={client} />);
-    const user = await searchOnce(client);
+    const user = await searchOnce();
 
     await user.click(screen.getByRole("button", { name: "星际穿越，2014，电影" }));
     await screen.findByText(release.title);
@@ -444,6 +445,30 @@ describe("片源助手客户端", () => {
     expect(await screen.findByText("已有相同任务")).not.toBeNull();
     expect(screen.getByRole("button", { name: "加入下载" })).toBeDisabled();
     expect(client.grab).not.toHaveBeenCalled();
+  });
+
+  it("opens the task view and pauses a task through the protected action route", async () => {
+    const client = makeClient();
+    const torrentHash = "a".repeat(40);
+    vi.mocked(client.getTorrents).mockResolvedValue([{
+      hash: torrentHash,
+      name: "Interstellar 2014 2160p",
+      progress: 0.42,
+      state: "downloading",
+      size: 20 * 1024 ** 3,
+      downloadSpeed: 5 * 1024 ** 2,
+      uploadSpeed: 0,
+      eta: 600,
+      savePath: "/Volumes/YourNAS/pt"
+    }]);
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: "任务" }));
+    expect(await screen.findByText("Interstellar 2014 2160p")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "暂停" }));
+    await waitFor(() => expect(client.torrentAction).toHaveBeenCalledWith({ action: "pause", hashes: [torrentHash] }, "csrf-test"));
   });
 
   it("shows header health and runtime rows and refreshes runtime status", async () => {

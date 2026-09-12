@@ -54,7 +54,8 @@ function baseServices() {
     qbittorrent: {
       listTorrents: vi.fn(async () => []),
       duplicateForRelease: vi.fn(async () => false),
-      check: vi.fn(async () => true)
+      check: vi.fn(async () => true),
+      torrentAction: vi.fn(async () => undefined)
     },
     nas: {
       preflight: vi.fn(async () => ({ path: config.nasPath, mounted: true, directoryExists: true, ready: true })),
@@ -256,6 +257,8 @@ describe("discovery routes", () => {
         title: "一部电影",
         posterUrl: "/api/discovery/actors/1048026/works/1295644/poster",
         mediaType: "movie" as const,
+        genres: [],
+        summary: "",
         sourceUrl: "https://movie.douban.com/subject/1295644/"
       }],
       page,

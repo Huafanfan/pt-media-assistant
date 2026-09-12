@@ -58,7 +58,7 @@ import { QBittorrentClient, QBittorrentError, type RawTorrent } from "./qbittorr
 const APP_VERSION = "0.1.0";
 
 export type ProwlarrService = Pick<ProwlarrClient, "search" | "getRelease" | "grab" | "check">;
-export type QBittorrentService = Pick<QBittorrentClient, "listTorrents" | "duplicateForRelease" | "check">;
+export type QBittorrentService = Pick<QBittorrentClient, "listTorrents" | "duplicateForRelease" | "check" | "torrentAction">;
 export type NasService = Pick<NasGuard, "preflight" | "storage">;
 export type DiscoveryServiceContract = Pick<DiscoveryService, "list" | "getReleases"> & {
   getDetails?: DiscoveryService["getDetails"];
@@ -90,6 +90,12 @@ const pairBodySchema = z.object({ code: z.string().regex(/^\d{6}$/u) });
 const releaseIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/u);
 const grabPreviewBodySchema = z.object({ releaseId: releaseIdSchema });
 const grabBodySchema = z.object({ releaseId: releaseIdSchema, confirm: z.literal(true) });
+const torrentActionSchema = z.object({
+  action: z.enum(["pause", "resume", "remove"]),
+  // qBittorrent infohashes are 32–64 alphanumeric characters. The client can
+  // never submit "all"; the adapter validates again before any upstream call.
+  hashes: z.array(z.string().regex(/^[A-Za-z0-9]{32,64}$/u)).min(1).max(50),
+}).strict();
 const discoveryCollectionSchema = z.enum(["movie-hot", "movie-weekly", "tv-hot", "tv-weekly", "top250"]);
 const discoveryItemIdSchema = z.string().regex(/^\d{1,16}$/u);
 const discoveryCollectionParamsSchema = z.object({ collection: discoveryCollectionSchema });
@@ -874,6 +880,23 @@ export async function createApp(services: AppServices = {}): Promise<FastifyInst
     try {
       const torrents: TorrentSummary[] = await qbittorrent.listTorrents();
       return reply.header("Cache-Control", "no-store").send(torrents);
+    } catch {
+      return genericUpstreamError(reply);
+    }
+  });
+
+  app.post("/api/torrents/actions", {
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    if (!authenticate(request, reply, sessions, config.configuredOrigin)) return;
+    reply.header("Cache-Control", "no-store");
+    const parsed = torrentActionSchema.safeParse(request.body);
+    if (!parsed.success) return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+    try {
+      await qbittorrent.torrentAction(parsed.data.action, parsed.data.hashes);
+      // Log the action and count only; task names are user data.
+      request.log.info({ event: "torrent_action", action: parsed.data.action, count: parsed.data.hashes.length });
+      return reply.send({ ok: true });
     } catch {
       return genericUpstreamError(reply);
     }
