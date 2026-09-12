@@ -93,6 +93,9 @@ describe("torrent task actions route", () => {
       { action: "remove", hashes: [] },
       { action: "remove", hashes: ["A".repeat(200)] },
       { action: "remove", hashes: [hash, hash], extra: true },
+      // Batch control stays out of scope even with valid hashes.
+      { action: "pause", hashes: [hash, hash] },
+      { action: "remove", hashes: [hash, "b".repeat(40)] },
     ];
     for (const payload of payloads) {
       const response = await app.inject({ method: "POST", url: "/api/torrents/actions", headers, payload });
@@ -118,6 +121,19 @@ describe("torrent task actions route", () => {
       payload: { action: "pause", hashes: [hash] },
     });
     expect(badCsrf.statusCode).toBe(403);
+    expect(torrentAction).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects a mismatched Origin", async () => {
+    const { app, headers, torrentAction } = await makeApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/torrents/actions",
+      headers: { ...headers, origin: "http://evil.example" },
+      payload: { action: "pause", hashes: [hash] },
+    });
+    expect(response.statusCode).toBe(403);
     expect(torrentAction).not.toHaveBeenCalled();
     await app.close();
   });
@@ -178,5 +194,6 @@ describe("qBittorrent control endpoint compatibility", () => {
     expect(calls.find((call) => call.url.endsWith("/api/v2/torrents/delete"))?.body).toContain("deleteFiles=false");
     await expect(client.torrentAction("remove", ["all"])).rejects.toThrow();
     await expect(client.torrentAction("pause", [])).rejects.toThrow();
+    await expect(client.torrentAction("pause", [hash, "b".repeat(40)])).rejects.toThrow();
   });
 });

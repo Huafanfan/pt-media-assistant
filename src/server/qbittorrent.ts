@@ -209,14 +209,15 @@ export class QBittorrentClient {
   }
 
   /**
-   * Pause, resume, or remove torrent records. Removal always keeps the
-   * downloaded files: the browser contract only exposes task removal. Hashes
-   * are re-validated here even though the route already checks them.
+   * Pause, resume, or remove exactly one torrent record. Removal always
+   * keeps the downloaded files: the browser contract only exposes task
+   * removal. Hashes are re-validated here even though the route already
+   * checks them, so no batch or `all` submission can reach upstream.
    */
   public async torrentAction(action: TorrentAction, hashes: string[]): Promise<void> {
     const normalized = [...new Set(hashes.map((hash) => hash.trim().toLowerCase()))];
-    if (normalized.length === 0 || normalized.length > 50) throw new QBittorrentError();
-    if (!normalized.every((hash) => /^[a-z0-9]{32,64}$/u.test(hash))) throw new QBittorrentError();
+    if (normalized.length !== 1) throw new QBittorrentError();
+    if (!/^[a-z0-9]{32,64}$/u.test(normalized[0]!)) throw new QBittorrentError();
     const headers = { "Content-Type": "application/x-www-form-urlencoded" };
     if (action === "remove") {
       const body = new URLSearchParams({ hashes: normalized.join("|"), deleteFiles: "false" });

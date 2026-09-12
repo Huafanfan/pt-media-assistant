@@ -101,7 +101,7 @@ Safe server start sequence:
 - `POST /api/grab/preview`: revalidates the release, NAS mount, and duplicate state.
 - `POST /api/grab`: repeats all checks and asks Prowlarr to send the release to qBittorrent.
 - `GET /api/torrents`: returns sanitized qBittorrent status.
-- `POST /api/torrents/actions`: pauses, resumes, or removes a task record (`deleteFiles=false`) by validated infohash; bounded to 50 hashes, never `all`, and never delete-files. Requires session, exact Origin, and CSRF.
+- `POST /api/torrents/actions`: pauses, resumes, or removes exactly one task record (`deleteFiles=false`) by validated infohash; never batch, never `all`, and never delete-files. Requires session, exact Origin, and CSRF.
 - `GET /api/history`: returns the family-shared seen records and AI preferences.
 - `POST /api/history/seen`: marks one movie/TV work as seen; same session/Origin/CSRF checks.
 - `DELETE /api/history/seen/:mediaType/:mediaId`: removes one seen record.

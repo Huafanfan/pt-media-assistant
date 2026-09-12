@@ -93,9 +93,9 @@ const grabPreviewBodySchema = z.object({ releaseId: releaseIdSchema });
 const grabBodySchema = z.object({ releaseId: releaseIdSchema, confirm: z.literal(true) });
 const torrentActionSchema = z.object({
   action: z.enum(["pause", "resume", "remove"]),
-  // qBittorrent infohashes are 32–64 alphanumeric characters. The client can
-  // never submit "all"; the adapter validates again before any upstream call.
-  hashes: z.array(z.string().regex(/^[A-Za-z0-9]{32,64}$/u)).min(1).max(50),
+  // Single task only: batch control is explicitly out of scope. Hashes are
+  // re-validated in the adapter, and the client can never submit "all".
+  hashes: z.array(z.string().regex(/^[A-Za-z0-9]{32,64}$/u)).length(1),
 }).strict();
 const discoveryCollectionSchema = z.enum(["movie-hot", "movie-weekly", "tv-hot", "tv-weekly", "top250"]);
 const discoveryItemIdSchema = z.string().regex(/^\d{1,16}$/u);
