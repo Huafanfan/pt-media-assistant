@@ -497,6 +497,25 @@ describe("片源助手客户端", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("keeps focus inside the status dialog and returns it to the trigger", async () => {
+    const client = makeClient();
+    render(<App client={client} />);
+    const user = userEvent.setup();
+
+    const trigger = await screen.findByRole("button", { name: "服务状态" });
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "服务与能力状态" });
+    const close = within(dialog).getByRole("button", { name: "关闭状态窗口" });
+    expect(document.activeElement).toBe(close);
+
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("opens the task view and pauses a task through the protected action route", async () => {
     const client = makeClient();
     const torrentHash = "a".repeat(40);
