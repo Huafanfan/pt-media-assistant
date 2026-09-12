@@ -89,6 +89,7 @@ export const assistantReleaseEvidenceSchema = z.object({
   codec: z.enum(["upstream", "title_inferred", "unknown"]),
   size: z.enum(["upstream", "unknown"]),
   seeders: z.enum(["upstream", "unknown"]),
+  season: z.enum(["title_inferred", "unknown"]),
 }).strict();
 export type AssistantReleaseEvidence = z.infer<typeof assistantReleaseEvidenceSchema>;
 
@@ -105,6 +106,8 @@ export const assistantRankedReleaseSchema = z.object({
   categories: z.array(z.string().trim().max(80)).max(20),
   resolution: assistantResolutionSchema.optional(),
   codec: z.string().trim().max(40).optional(),
+  /** Title-inferred season; the UI labels it as an inference. */
+  season: z.number().int().min(1).max(50).optional(),
   freeleech: z.boolean(),
   freeleechState: z.enum(["yes", "no", "unknown"]).optional(),
   evidence: assistantReleaseEvidenceSchema.optional(),

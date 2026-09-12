@@ -1,5 +1,5 @@
 import { Circle, CircleDashed, CircleDot, Eye, EyeOff, RefreshCw, Star, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DiscoveryActor, DiscoveryItemDetails, DiscoveryMedia, DiscoveryReleaseResponse, ReleaseSummary } from "../../shared/contracts";
 import { DiscoveryPoster } from "./DiscoveryPoster";
 import { formatBytes } from "./ReleaseList";
@@ -26,6 +26,15 @@ export type MediaInspectorProps = {
 };
 
 const RELEASE_PAGE_SIZE = 10;
+
+type ReleaseSort = "default" | "seeders" | "size" | "newest";
+type ReleaseFilters = {
+  season: string;
+  resolution: string;
+  codec: string;
+  indexer: string;
+  freeleech: boolean;
+};
 
 function formatRating(rating: number | undefined): string {
   return typeof rating === "number" && Number.isFinite(rating) ? rating.toFixed(1) : "—";
@@ -75,17 +84,44 @@ export function MediaInspector({
   const itemHeading = item?.title ?? "候选片源";
   const hasResponse = Boolean(releaseResponse && !error);
   const releases = releaseResponse?.releases ?? [];
-  const releaseTotal = Math.max(releases.length, releaseResponse?.total ?? 0);
   const [releasePage, setReleasePage] = useState(1);
+  const [releaseFilters, setReleaseFilters] = useState<ReleaseFilters>({ season: "all", resolution: "all", codec: "all", indexer: "all", freeleech: false });
+  const [releaseSort, setReleaseSort] = useState<ReleaseSort>("default");
+
+  const seasonOptions = useMemo(
+    () => [...new Set(releases.flatMap((release) => (typeof release.season === "number" ? [release.season] : [])))].sort((left, right) => left - right),
+    [releases]
+  );
+  const resolutionOptions = useMemo(() => [...new Set(releases.flatMap((release) => (release.resolution ? [release.resolution] : [])))], [releases]);
+  const codecOptions = useMemo(() => [...new Set(releases.flatMap((release) => (release.codec ? [release.codec] : [])))], [releases]);
+  const indexerOptions = useMemo(() => [...new Set(releases.map((release) => release.indexer).filter(Boolean))].sort((left, right) => left.localeCompare(right)), [releases]);
+  // Filtering and sorting are local to the bounded server snapshot; no extra
+  // PT request is created by changing a control.
+  const sortedReleases = useMemo(() => {
+    const filtered = releases.filter((release) => {
+      if (releaseFilters.season !== "all" && String(release.season ?? "") !== releaseFilters.season) return false;
+      if (releaseFilters.resolution !== "all" && release.resolution !== releaseFilters.resolution) return false;
+      if (releaseFilters.codec !== "all" && release.codec !== releaseFilters.codec) return false;
+      if (releaseFilters.indexer !== "all" && release.indexer !== releaseFilters.indexer) return false;
+      if (releaseFilters.freeleech && !(release.freeleech || release.freeleechState === "yes")) return false;
+      return true;
+    });
+    if (releaseSort === "seeders") return [...filtered].sort((left, right) => right.seeders - left.seeders);
+    if (releaseSort === "size") return [...filtered].sort((left, right) => left.size - right.size);
+    if (releaseSort === "newest") return [...filtered].sort((left, right) => left.ageDays - right.ageDays);
+    return filtered;
+  }, [releases, releaseFilters, releaseSort]);
+
+  const releaseTotal = sortedReleases.length;
   const releasePageCount = Math.max(1, Math.ceil(releaseTotal / RELEASE_PAGE_SIZE));
   const activeReleasePage = Math.min(releasePage, releasePageCount);
   const releaseStart = (activeReleasePage - 1) * RELEASE_PAGE_SIZE;
-  const visibleReleases = releases.slice(releaseStart, releaseStart + RELEASE_PAGE_SIZE);
+  const visibleReleases = sortedReleases.slice(releaseStart, releaseStart + RELEASE_PAGE_SIZE);
   const releaseEnd = releaseStart + visibleReleases.length;
 
   useEffect(() => {
     setReleasePage(1);
-  }, [item?.id]);
+  }, [item?.id, releaseFilters, releaseSort]);
 
   useEffect(() => {
     if (releasePage > releasePageCount) setReleasePage(releasePageCount);
@@ -196,7 +232,7 @@ export function MediaInspector({
                   <h3 id="discovery-release-title">候选片源</h3>
                   <p>
                     {hasResponse
-                      ? `${statusSummary(releaseResponse as DiscoveryReleaseResponse)} · ${visibleReleases.length} 个当前候选`
+                      ? `${statusSummary(releaseResponse as DiscoveryReleaseResponse)} · ${releaseTotal} 个当前候选`
                       : "选择片源后仍需在现有面板确认下载"}
                   </p>
                 </div>
@@ -245,6 +281,67 @@ export function MediaInspector({
                 </div>
               ) : (
                 <>
+                  <div className="discovery-release-filters" aria-label="片源筛选与排序">
+                    {seasonOptions.length > 0 ? (
+                      <label className="discovery-filter">
+                        <span>季（推断）</span>
+                        <select
+                          value={releaseFilters.season}
+                          title="季信息由发布标题推断，仅用于筛选，不代表已确认季集匹配"
+                          onChange={(event) => setReleaseFilters((current) => ({ ...current, season: event.target.value }))}
+                        >
+                          <option value="all">全部</option>
+                          {seasonOptions.map((season) => <option key={season} value={String(season)}>第 {season} 季</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                    {resolutionOptions.length > 1 ? (
+                      <label className="discovery-filter">
+                        <span>分辨率</span>
+                        <select value={releaseFilters.resolution} onChange={(event) => setReleaseFilters((current) => ({ ...current, resolution: event.target.value }))}>
+                          <option value="all">全部</option>
+                          {resolutionOptions.map((resolution) => <option key={resolution} value={resolution}>{resolution}</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                    {codecOptions.length > 1 ? (
+                      <label className="discovery-filter">
+                        <span>编码</span>
+                        <select value={releaseFilters.codec} onChange={(event) => setReleaseFilters((current) => ({ ...current, codec: event.target.value }))}>
+                          <option value="all">全部</option>
+                          {codecOptions.map((codec) => <option key={codec} value={codec}>{codec}</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                    {indexerOptions.length > 1 ? (
+                      <label className="discovery-filter">
+                        <span>索引器</span>
+                        <select value={releaseFilters.indexer} onChange={(event) => setReleaseFilters((current) => ({ ...current, indexer: event.target.value }))}>
+                          <option value="all">全部</option>
+                          {indexerOptions.map((indexer) => <option key={indexer} value={indexer}>{indexer}</option>)}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="discovery-filter is-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={releaseFilters.freeleech}
+                        onChange={(event) => setReleaseFilters((current) => ({ ...current, freeleech: event.target.checked }))}
+                      />
+                      <span>仅免费</span>
+                    </label>
+                    <label className="discovery-filter">
+                      <span>排序</span>
+                      <select value={releaseSort} onChange={(event) => setReleaseSort(event.target.value as ReleaseSort)}>
+                        <option value="default">默认</option>
+                        <option value="seeders">做种多</option>
+                        <option value="size">体积小</option>
+                        <option value="newest">最新</option>
+                      </select>
+                    </label>
+                  </div>
+                  {visibleReleases.length > 0 ? (
+                    <>
                   <div className="discovery-release-columns" aria-hidden="true">
                     <span>类型 / 发布</span>
                     <span>分辨率</span>
@@ -277,6 +374,7 @@ export function MediaInspector({
                               {release.protocol === "torrent" ? "TORRENT" : release.protocol.toUpperCase()}
                               <span aria-hidden="true">·</span>
                               {release.indexer}
+                              {typeof release.season === "number" ? <em title="季信息由发布标题推断">第 {release.season} 季</em> : null}
                               {release.freeleech ? <em>免费</em> : null}
                             </span>
                           </span>
@@ -315,6 +413,13 @@ export function MediaInspector({
                       </div>
                     </nav>
                   ) : null}
+                    </>
+                  ) : (
+                    <div className="discovery-inspector-state discovery-inspector-empty-state" role="status">
+                      <strong>没有符合筛选的候选</strong>
+                      <p>调整或清除筛选条件后再试。</p>
+                    </div>
+                  )}
                 </>
               )}
             </section>

@@ -143,6 +143,7 @@ function toRankedRelease(
     categories: release.categories.map((category) => cleanText(category, 80)).filter(Boolean).slice(0, 20),
     ...(release.resolution ? { resolution: release.resolution as AssistantRankedRelease["resolution"] } : {}),
     ...(release.codec ? { codec: cleanText(release.codec, 40) } : {}),
+    ...(release.season ? { season: release.season } : {}),
     freeleech: Boolean(release.freeleech),
     ...(release.freeleechState ? { freeleechState: release.freeleechState } : {}),
     ...(release.evidence ? { evidence: release.evidence } : {}),

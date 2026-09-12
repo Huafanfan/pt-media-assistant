@@ -208,7 +208,7 @@ describe("recommendation snapshot references", () => {
     const started = new Promise<void>((resolve) => { searchStarted = resolve; });
     const search = vi.fn(async (
       _intent: { searchTerm: string },
-      _limit: number,
+      _limit?: number,
       options?: { signal?: AbortSignal },
     ) => {
       searchStarted();
@@ -239,13 +239,26 @@ describe("release field evidence", () => {
   it("distinguishes absent freeleech and numeric fields from confirmed values", () => {
     const unknown = sanitizeRelease({ title: "Movie 1080p HEVC", size: null, seeders: "" }, "release-id");
     expect(unknown.freeleechState).toBe("unknown");
-    expect(unknown.evidence).toEqual({ resolution: "title_inferred", codec: "title_inferred", size: "unknown", seeders: "unknown" });
+    expect(unknown.evidence).toEqual({ resolution: "title_inferred", codec: "title_inferred", size: "unknown", seeders: "unknown", season: "unknown" });
     const known = sanitizeRelease({ title: "Movie", resolution: "1080p", codec: "HEVC", size: 10, seeders: 0, freeleech: false }, "release-id");
     expect(known.freeleechState).toBe("no");
     expect(known.evidence?.seeders).toBe("upstream");
     expect(sanitizeRelease({ indexerFlags: ["Freeleech"] }, "release-id").freeleechState).toBe("yes");
     expect(sanitizeRelease({ indexerFlags: ["非免费"] }, "release-id").freeleechState).toBe("unknown");
     expect(sanitizeRelease({ indexerFlags: ["非Freeleech"] }, "release-id").freeleechState).toBe("unknown");
+  });
+
+  it("infers a season only from explicit season tokens in the title", () => {
+    expect(sanitizeRelease({ title: "Show S02 1080p" }, "id").season).toBe(2);
+    expect(sanitizeRelease({ title: "Show.Season.3.1080p" }, "id").season).toBe(3);
+    expect(sanitizeRelease({ title: "Show 第三季 1080p" }, "id").season).toBe(3);
+    expect(sanitizeRelease({ title: "Show 第十二季 1080p" }, "id").season).toBe(12);
+    expect(sanitizeRelease({ title: "Show S02 1080p" }, "id").evidence?.season).toBe("title_inferred");
+    expect(sanitizeRelease({ title: "Show 1080p HEVC" }, "id").season).toBeUndefined();
+    expect(sanitizeRelease({ title: "Show 1080p HEVC" }, "id").evidence?.season).toBe("unknown");
+    // Bare numbers and words ending in "s" are never guessed as a season.
+    expect(sanitizeRelease({ title: "Se7en 1995 1080p" }, "id").season).toBeUndefined();
+    expect(sanitizeRelease({ title: "The Class 10 1080p" }, "id").season).toBeUndefined();
   });
 
   it("does not treat unknown size as satisfying a hard max-size constraint", async () => {

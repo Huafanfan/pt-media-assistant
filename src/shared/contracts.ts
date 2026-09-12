@@ -73,6 +73,8 @@ export type ReleaseSummary = {
   categories: string[];
   resolution?: string;
   codec?: string;
+  /** Title-inferred season; never proof of a specific season match. */
+  season?: number;
   freeleech: boolean;
   freeleechState?: "yes" | "no" | "unknown";
   evidence?: {
@@ -80,6 +82,7 @@ export type ReleaseSummary = {
     codec: "upstream" | "title_inferred" | "unknown";
     size: "upstream" | "unknown";
     seeders: "upstream" | "unknown";
+    season: "title_inferred" | "unknown";
   };
 };
 

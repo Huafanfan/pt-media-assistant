@@ -341,6 +341,9 @@ function normalizeRelease(payload: unknown): ReleaseSummary | null {
     categories,
     ...(typeof value.resolution === "string" ? { resolution: value.resolution } : {}),
     ...(typeof value.codec === "string" ? { codec: value.codec } : {}),
+    ...(typeof value.season === "number" && Number.isInteger(value.season) && value.season >= 1 && value.season <= 50
+      ? { season: value.season }
+      : {}),
     freeleech: asBoolean(value.freeleech),
     ...(value.freeleechState === "yes" || value.freeleechState === "no" || value.freeleechState === "unknown"
       ? { freeleechState: value.freeleechState }
@@ -355,7 +358,8 @@ function normalizeRelease(payload: unknown): ReleaseSummary | null {
               ? evidence.codec
               : "unknown",
             size: evidence.size === "upstream" ? "upstream" : "unknown",
-            seeders: evidence.seeders === "upstream" ? "upstream" : "unknown"
+            seeders: evidence.seeders === "upstream" ? "upstream" : "unknown",
+            season: evidence.season === "title_inferred" ? "title_inferred" : "unknown"
           }
         }
       : {})

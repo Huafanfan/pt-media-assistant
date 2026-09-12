@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { DiscoveryItem, DiscoveryReleaseResponse, ReleaseSummary } from "../../src/shared/contracts";
@@ -89,9 +89,10 @@ describe("DiscoveryInspector", () => {
     expect(screen.getByRole("button", { name: "演员甲" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "演员乙" })).toBeInTheDocument();
     expect(screen.getByText("导演甲")).toBeInTheDocument();
-    expect(screen.getByText("1080p")).toBeInTheDocument();
-    expect(screen.getByText("21.3 GB")).toBeInTheDocument();
-    expect(screen.getByText("免费")).toBeInTheDocument();
+    const candidateList = screen.getByRole("radiogroup", { name: "候选片源列表" });
+    expect(within(candidateList).getByText("1080p")).toBeInTheDocument();
+    expect(within(candidateList).getByText("21.3 GB")).toBeInTheDocument();
+    expect(within(candidateList).getByText("免费")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Cien\.Años\.de\.Soledad\.S02.*已选择/ })).toHaveAttribute("aria-checked", "true");
 
     const radios = screen.getAllByRole("radio");
@@ -150,5 +151,33 @@ describe("DiscoveryInspector", () => {
     expect(screen.getByText("Candidate 11")).toBeInTheDocument();
     expect(screen.getByText("Candidate 12")).toBeInTheDocument();
     expect(screen.getByText("第 2 页 · 11–12 / 12")).toBeInTheDocument();
+  });
+
+  it("filters and sorts the cached snapshot locally without selecting or re-querying", async () => {
+    const user = userEvent.setup();
+    const candidates = [
+      release({ id: "s1", title: "Show S01 1080p", season: 1, seeders: 10, size: 10 * 1024 ** 3 }),
+      release({ id: "s2", title: "Show S02 2160p", season: 2, resolution: "2160p", seeders: 50, size: 30 * 1024 ** 3 }),
+      release({ id: "s3", title: "Show S02 720p", season: 2, resolution: "720p", seeders: 5, size: 5 * 1024 ** 3, freeleech: false })
+    ];
+    cleanup();
+    const props = renderInspector({ releaseResponse: { ...response, total: candidates.length, releases: candidates } });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /季/ }), "2");
+    expect(screen.queryByText("Show S01 1080p")).not.toBeInTheDocument();
+    expect(screen.getByText("Show S02 2160p")).toBeInTheDocument();
+    expect(screen.getByText("Show S02 720p")).toBeInTheDocument();
+
+    // Sorting applies to the filtered snapshot only and never triggers a preview.
+    await user.selectOptions(screen.getByRole("combobox", { name: /排序/ }), "seeders");
+    expect(screen.getAllByRole("radio")[0]).toHaveAccessibleName(/Show S02 2160p/);
+    expect(props.onSelectRelease).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("checkbox", { name: "仅免费" }));
+    expect(screen.getByText("Show S02 2160p")).toBeInTheDocument();
+    expect(screen.queryByText("Show S02 720p")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /分辨率/ }), "720p");
+    expect(screen.getByText("没有符合筛选的候选")).toBeInTheDocument();
   });
 });

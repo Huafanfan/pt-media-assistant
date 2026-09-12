@@ -78,6 +78,7 @@ export type DiscoveryServiceOptions = {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   minIntervalMs?: number;
+  /** Accepted for compatibility; the release snapshot size stays fixed. */
   collectionLimit?: number;
 };
 
@@ -149,6 +150,7 @@ function copyRelease(release: ReleaseSummary): ReleaseSummary {
       : [],
     ...(release.resolution !== undefined ? { resolution: release.resolution } : {}),
     ...(release.codec !== undefined ? { codec: release.codec } : {}),
+    ...(release.season !== undefined ? { season: release.season } : {}),
     freeleech: release.freeleech === true,
     ...(release.freeleechState === "yes" || release.freeleechState === "no" || release.freeleechState === "unknown"
       ? { freeleechState: release.freeleechState }
@@ -163,13 +165,17 @@ function copyRelease(release: ReleaseSummary): ReleaseSummary {
           : "unknown",
         size: evidence.size === "upstream" ? "upstream" : "unknown",
         seeders: evidence.seeders === "upstream" ? "upstream" : "unknown",
+        season: evidence.season === "title_inferred" ? "title_inferred" : "unknown",
       },
     } : {}),
   };
 }
 
-function abortReason(signal?: AbortSignal): unknown {
-  return signal?.reason ?? new DOMException("The operation was aborted", "AbortError");
+type AbortReason = Error;
+
+function abortReason(signal?: AbortSignal): AbortReason {
+  const reason: unknown = signal?.reason;
+  return reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError");
 }
 
 function cloneReleaseResponse(response: DiscoveryReleaseResponse): DiscoveryReleaseResponse {
@@ -244,7 +250,6 @@ export class DiscoveryService {
   private readonly now: () => number;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly minIntervalMs: number;
-  private readonly collectionLimit: number;
   private readonly releaseCache = new Map<string, CachedReleases>();
   private readonly pendingReleases = new Map<string, PendingReleaseWork>();
   private ptQueue: Promise<unknown> = Promise.resolve();
@@ -286,7 +291,6 @@ export class DiscoveryService {
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? defaultSleep;
     this.minIntervalMs = Math.max(0, options.minIntervalMs ?? PT_QUERY_MIN_INTERVAL_MS);
-    this.collectionLimit = normalizeDiscoveryLimit(options.collectionLimit ?? DEFAULT_DISCOVERY_LIMIT);
   }
 
   public async list(
@@ -581,7 +585,9 @@ export class DiscoveryService {
   private async queryReleases(
     mediaType: "movie" | "tv",
     itemId: string,
-    limit: number,
+    // The requested page limit never shrinks the bounded release snapshot;
+    // it is kept in the signature for the public getMediaReleases route.
+    _limit: number,
     key: string,
     knownMedia?: DiscoveryMedia,
     options: DiscoveryReleaseQueryOptions = {},

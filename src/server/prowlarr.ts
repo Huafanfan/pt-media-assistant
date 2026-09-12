@@ -123,10 +123,26 @@ function integerValue(value: unknown, fallback = 0): number {
   return Math.max(0, Math.floor(numberValue(value, fallback)));
 }
 
-function getRawObjectValue(raw: JsonObject, ...keys: string[]): unknown {
+function getRawObjectValue(raw: JsonObject, ...keys: string[]): ProwlarrJsonValue | undefined {
   for (const key of keys) {
-    if (raw[key] !== undefined && raw[key] !== null) return raw[key];
+    if (raw[key] !== undefined && raw[key] !== null) return asJsonValue(raw[key]);
   }
+  return undefined;
+}
+
+/** JSON-shaped value read from a decoded Prowlarr response. */
+type ProwlarrJsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | ProwlarrJsonValue[]
+  | { [key: string]: ProwlarrJsonValue };
+
+function asJsonValue(value: unknown): ProwlarrJsonValue | undefined {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value as ProwlarrJsonValue[];
+  if (typeof value === "object") return value as { [key: string]: ProwlarrJsonValue };
   return undefined;
 }
 
@@ -147,6 +163,36 @@ function inferCodec(title: string, raw: JsonObject): string | undefined {
   if (direct) return direct;
   const match = /\b(?:x26[45]|h\.?26[45]|hevc|av1|avc)\b/iu.exec(title);
   return match?.[0]?.toUpperCase();
+}
+
+const CHINESE_DIGITS: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+function parseSeasonNumber(value: string): number | undefined {
+  if (/^\d{1,2}$/u.test(value)) {
+    const parsed = Number(value);
+    return parsed >= 1 ? parsed : undefined;
+  }
+  if (!/^[一二三四五六七八九十]{1,3}$/u.test(value)) return undefined;
+  if (value === "十") return 10;
+  if (value.length === 2 && value.startsWith("十")) return 10 + (CHINESE_DIGITS[value[1]!] ?? 0);
+  if (value.length === 2 && value.endsWith("十")) return (CHINESE_DIGITS[value[0]!] ?? 0) * 10;
+  if (value.length === 3 && value[1] === "十") return (CHINESE_DIGITS[value[0]!] ?? 0) * 10 + (CHINESE_DIGITS[value[2]!] ?? 0);
+  return CHINESE_DIGITS[value];
+}
+
+/**
+ * Season detection is a title heuristic only; it is never proof that a
+ * release matches a specific season of a work. Titles without an explicit
+ * season token stay unknown instead of being guessed from other numbers.
+ */
+export function inferSeason(title: string): number | undefined {
+  const english = /\b(?:s|season)[\s._-]*(\d{1,2})(?!\d)/iu.exec(title);
+  const chinese = /第\s*([一二三四五六七八九十\d]{1,3})\s*季/u.exec(title);
+  const token = english?.[1] ?? chinese?.[1];
+  if (token === undefined) return undefined;
+  const parsed = parseSeasonNumber(token);
+  if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 50) return undefined;
+  return parsed;
 }
 
 function categoryNames(value: unknown): string[] {
@@ -191,10 +237,11 @@ function hasNumber(value: unknown): boolean {
 /** Reduce one full Prowlarr ReleaseResource to the browser-safe contract. */
 export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
   const title = boundedString(getRawObjectValue(raw, "title", "sortTitle", "fileName"), "Untitled release");
-  const ageDays = raw.age !== undefined
-    ? numberValue(raw.age)
-    : numberValue(raw.ageHours, 0) / 24;
+  const ageDays = raw.age === undefined
+    ? numberValue(raw.ageHours, 0) / 24
+    : numberValue(raw.age);
   const protocol = stringValue(raw.protocol).toLowerCase() === "usenet" ? "usenet" : "torrent";
+  const season = inferSeason(title);
   return {
     id,
     title,
@@ -208,6 +255,7 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
     categories: categoryNames(raw.categories),
     ...(inferResolution(title, raw) ? { resolution: inferResolution(title, raw) } : {}),
     ...(inferCodec(title, raw) ? { codec: inferCodec(title, raw) } : {}),
+    ...(season ? { season } : {}),
     freeleech: isFreeleech(raw),
     freeleechState: freeleechState(raw),
     evidence: {
@@ -215,6 +263,7 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
       codec: boundedString(getRawObjectValue(raw, "codec", "videoCodec")) ? "upstream" : inferCodec(title, raw) ? "title_inferred" : "unknown",
       size: hasNumber(raw.size) ? "upstream" : "unknown",
       seeders: hasNumber(raw.seeders) ? "upstream" : "unknown",
+      season: season ? "title_inferred" : "unknown",
     },
   };
 }
