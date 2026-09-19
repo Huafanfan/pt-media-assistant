@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import type { ServiceCapabilities, ServiceHealth } from "../../shared/contracts";
+import type {
+  ServiceCapabilities,
+  ServiceHealth,
+} from "../../shared/contracts";
 
 function upstreamLabel(ok: boolean | undefined): string {
   return ok ? "正常" : "异常";
@@ -12,7 +15,11 @@ function capabilityLabel(enabled: boolean, configured: boolean): string {
   return configured ? "已启用" : "已启用 · 配置不完整";
 }
 
-function CapabilityRows({ capabilities }: { capabilities: ServiceCapabilities | undefined }) {
+function CapabilityRows({
+  capabilities,
+}: {
+  capabilities: ServiceCapabilities | undefined;
+}) {
   const ai = capabilities?.ai;
   const webSearch = capabilities?.webSearch;
   const persistence = capabilities?.persistence;
@@ -20,7 +27,9 @@ function CapabilityRows({ capabilities }: { capabilities: ServiceCapabilities | 
     <ul className="status-list">
       <li>
         <span>AI 推荐</span>
-        <strong>{capabilityLabel(ai?.enabled ?? false, ai?.configured ?? false)}</strong>
+        <strong>
+          {capabilityLabel(ai?.enabled ?? false, ai?.configured ?? false)}
+        </strong>
       </li>
       {ai?.model ? (
         <li>
@@ -30,7 +39,12 @@ function CapabilityRows({ capabilities }: { capabilities: ServiceCapabilities | 
       ) : null}
       <li>
         <span>联网搜索</span>
-        <strong>{capabilityLabel(webSearch?.enabled ?? false, webSearch?.configured ?? false)}</strong>
+        <strong>
+          {capabilityLabel(
+            webSearch?.enabled ?? false,
+            webSearch?.configured ?? false,
+          )}
+        </strong>
       </li>
       <li>
         <span>下载开关</span>
@@ -52,7 +66,7 @@ function CapabilityRows({ capabilities }: { capabilities: ServiceCapabilities | 
 
 export function ServiceStatusDialog({
   health,
-  onClose
+  onClose,
 }: {
   health: ServiceHealth | null;
   onClose: () => void;
@@ -61,7 +75,10 @@ export function ServiceStatusDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previous =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     closeRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
@@ -71,7 +88,7 @@ export function ServiceStatusDialog({
       if (event.key !== "Tab") return;
       // Keep keyboard focus inside the dialog while it is open.
       const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
       if (!focusables || focusables.length === 0) return;
       const first = focusables[0]!;
@@ -104,7 +121,13 @@ export function ServiceStatusDialog({
       >
         <header className="status-dialog-heading">
           <h2 id="status-dialog-title">服务与能力状态</h2>
-          <button ref={closeRef} className="icon-button small-icon-button" type="button" onClick={onClose} aria-label="关闭状态窗口">
+          <button
+            ref={closeRef}
+            className="icon-button small-icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="关闭状态窗口"
+          >
             <X size={18} aria-hidden="true" />
           </button>
         </header>
@@ -114,15 +137,27 @@ export function ServiceStatusDialog({
           <ul className="status-list">
             <li>
               <span>Prowlarr / 索引器</span>
-              <strong className={health?.services?.prowlarr ? "is-ok" : "is-error"}>{upstreamLabel(health?.services?.prowlarr)}</strong>
+              <strong
+                className={health?.services?.prowlarr ? "is-ok" : "is-error"}
+              >
+                {upstreamLabel(health?.services?.prowlarr)}
+              </strong>
             </li>
             <li>
               <span>qBittorrent</span>
-              <strong className={health?.services?.qbittorrent ? "is-ok" : "is-error"}>{upstreamLabel(health?.services?.qbittorrent)}</strong>
+              <strong
+                className={health?.services?.qbittorrent ? "is-ok" : "is-error"}
+              >
+                {upstreamLabel(health?.services?.qbittorrent)}
+              </strong>
             </li>
             <li>
               <span>NAS 挂载</span>
-              <strong className={health?.services?.nasMounted ? "is-ok" : "is-error"}>{upstreamLabel(health?.services?.nasMounted)}</strong>
+              <strong
+                className={health?.services?.nasMounted ? "is-ok" : "is-error"}
+              >
+                {upstreamLabel(health?.services?.nasMounted)}
+              </strong>
             </li>
           </ul>
         </section>
@@ -133,7 +168,8 @@ export function ServiceStatusDialog({
         </section>
 
         <p className="status-dialog-note">
-          这里只报告配置与就绪状态，不发起模型或搜索调用；“已配置”不代表上游当下一定可用。版本 {health?.version ?? "未知"}。
+          这里只报告配置与就绪状态，不发起模型或搜索调用；“已配置”不代表上游当下一定可用。版本{" "}
+          {health?.version ?? "未知"}。
         </p>
       </div>
     </div>

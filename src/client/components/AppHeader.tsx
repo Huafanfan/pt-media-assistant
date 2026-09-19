@@ -2,7 +2,10 @@ import { RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ServiceHealth } from "../../shared/contracts";
 
-function serviceHealthText(health: ServiceHealth | null, paired: boolean): string {
+function serviceHealthText(
+  health: ServiceHealth | null,
+  paired: boolean,
+): string {
   if (!paired) {
     return "等待设备配对";
   }
@@ -12,7 +15,9 @@ function serviceHealthText(health: ServiceHealth | null, paired: boolean): strin
 
   const services = health.services;
   if (!services) {
-    return health.status === "ok" ? "TJUPT · qBittorrent · NAS 已连接" : "服务检查中";
+    return health.status === "ok"
+      ? "TJUPT · qBittorrent · NAS 已连接"
+      : "服务检查中";
   }
 
   const indexer = services.prowlarr ? "TJUPT" : "TJUPT 未连接";
@@ -27,7 +32,7 @@ export function AppHeader({
   healthError,
   onRefresh,
   onShowStatus,
-  runtimeStatus
+  runtimeStatus,
 }: {
   health: ServiceHealth | null;
   paired: boolean;
@@ -44,16 +49,27 @@ export function AppHeader({
       <div className="brand-lockup">
         <h1>片源助手</h1>
         <div className="header-status">
-          <p className={`service-status ${isHealthy ? "is-healthy" : "is-degraded"}`}>
+          <p
+            className={`service-status ${isHealthy ? "is-healthy" : "is-degraded"}`}
+          >
             <span className="status-dot" aria-hidden="true" />
             <span>{statusText}</span>
             {onRefresh ? (
-              <button className="service-status-refresh" type="button" onClick={onRefresh} aria-label="刷新状态">
+              <button
+                className="service-status-refresh"
+                type="button"
+                onClick={onRefresh}
+                aria-label="刷新状态"
+              >
                 <RefreshCw size={14} aria-hidden="true" />
               </button>
             ) : null}
             {onShowStatus ? (
-              <button className="service-status-detail" type="button" onClick={onShowStatus}>
+              <button
+                className="service-status-detail"
+                type="button"
+                onClick={onShowStatus}
+              >
                 服务状态
               </button>
             ) : null}

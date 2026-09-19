@@ -29,166 +29,257 @@ const assistantPreferencesShape = {
   yearFrom: z.number().int().min(1888).max(2200).nullable().default(null),
   yearTo: z.number().int().min(1888).max(2200).nullable().default(null),
   mood: z.string().trim().max(160).default(""),
-  seenMediaIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/u)).max(100).default([]),
+  seenMediaIds: z
+    .array(z.string().regex(/^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/u))
+    .max(100)
+    .default([]),
   resolution: assistantResolutionSchema.nullable().default(null),
-  maxSizeBytes: z.number().int().positive().max(2 * 1024 ** 4).nullable().default(null),
+  maxSizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(2 * 1024 ** 4)
+    .nullable()
+    .default(null),
   freeleechRequired: z.boolean().default(false),
   freeleechPreferred: z.boolean().default(false),
   onlyAvailable: z.boolean().default(false),
 } as const;
 
-export const assistantPreferencesSchema = z.object(assistantPreferencesShape).strict().superRefine((value, context) => {
-  if (value.yearFrom !== null && value.yearTo !== null && value.yearFrom > value.yearTo) {
-    context.addIssue({ code: "custom", path: ["yearFrom"], message: "yearFrom must not exceed yearTo" });
-  }
-  if (value.freeleechRequired && value.freeleechPreferred) {
-    context.addIssue({ code: "custom", path: ["freeleechPreferred"], message: "required and preferred are mutually exclusive" });
-  }
-});
+export const assistantPreferencesSchema = z
+  .object(assistantPreferencesShape)
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.yearFrom !== null &&
+      value.yearTo !== null &&
+      value.yearFrom > value.yearTo
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["yearFrom"],
+        message: "yearFrom must not exceed yearTo",
+      });
+    }
+    if (value.freeleechRequired && value.freeleechPreferred) {
+      context.addIssue({
+        code: "custom",
+        path: ["freeleechPreferred"],
+        message: "required and preferred are mutually exclusive",
+      });
+    }
+  });
 export type AssistantPreferences = z.infer<typeof assistantPreferencesSchema>;
 
 /** Model updates are partial, but still reject unknown fields. */
-export const assistantPreferencesPatchSchema = z.object({
-  mediaType: assistantPreferencesShape.mediaType,
-  includeGenres: assistantPreferencesShape.includeGenres.removeDefault(),
-  excludeGenres: assistantPreferencesShape.excludeGenres.removeDefault(),
-  yearFrom: assistantPreferencesShape.yearFrom.removeDefault(),
-  yearTo: assistantPreferencesShape.yearTo.removeDefault(),
-  mood: assistantPreferencesShape.mood.removeDefault(),
-  seenMediaIds: assistantPreferencesShape.seenMediaIds.removeDefault(),
-  resolution: assistantPreferencesShape.resolution.removeDefault(),
-  maxSizeBytes: assistantPreferencesShape.maxSizeBytes.removeDefault(),
-  freeleechRequired: assistantPreferencesShape.freeleechRequired.removeDefault(),
-  freeleechPreferred: assistantPreferencesShape.freeleechPreferred.removeDefault(),
-  onlyAvailable: assistantPreferencesShape.onlyAvailable.removeDefault(),
-}).partial().strict();
-export type AssistantPreferencesPatch = z.infer<typeof assistantPreferencesPatchSchema>;
+export const assistantPreferencesPatchSchema = z
+  .object({
+    mediaType: assistantPreferencesShape.mediaType,
+    includeGenres: assistantPreferencesShape.includeGenres.removeDefault(),
+    excludeGenres: assistantPreferencesShape.excludeGenres.removeDefault(),
+    yearFrom: assistantPreferencesShape.yearFrom.removeDefault(),
+    yearTo: assistantPreferencesShape.yearTo.removeDefault(),
+    mood: assistantPreferencesShape.mood.removeDefault(),
+    seenMediaIds: assistantPreferencesShape.seenMediaIds.removeDefault(),
+    resolution: assistantPreferencesShape.resolution.removeDefault(),
+    maxSizeBytes: assistantPreferencesShape.maxSizeBytes.removeDefault(),
+    freeleechRequired:
+      assistantPreferencesShape.freeleechRequired.removeDefault(),
+    freeleechPreferred:
+      assistantPreferencesShape.freeleechPreferred.removeDefault(),
+    onlyAvailable: assistantPreferencesShape.onlyAvailable.removeDefault(),
+  })
+  .partial()
+  .strict();
+export type AssistantPreferencesPatch = z.infer<
+  typeof assistantPreferencesPatchSchema
+>;
 
-export const assistantTurnRequestSchema = z.object({
-  conversationId: z.string().uuid().optional(),
-  clientTurnId: z.string().uuid(),
-  message: z.string().trim().min(1).max(2_000),
-}).strict();
+export const assistantTurnRequestSchema = z
+  .object({
+    conversationId: z.string().uuid().optional(),
+    clientTurnId: z.string().uuid(),
+    message: z.string().trim().min(1).max(2_000),
+  })
+  .strict();
 export type AssistantTurnRequest = z.infer<typeof assistantTurnRequestSchema>;
 
-export const assistantConstraintResultSchema = z.object({
-  key: z.string().trim().min(1).max(64),
-  status: z.enum(["met", "not_met", "unknown"]),
-  detail: z.string().trim().max(240),
-}).strict();
-export type AssistantConstraintResult = z.infer<typeof assistantConstraintResultSchema>;
+export const assistantConstraintResultSchema = z
+  .object({
+    key: z.string().trim().min(1).max(64),
+    status: z.enum(["met", "not_met", "unknown"]),
+    detail: z.string().trim().max(240),
+  })
+  .strict();
+export type AssistantConstraintResult = z.infer<
+  typeof assistantConstraintResultSchema
+>;
 
-export const assistantEvidenceSchema = z.object({
-  id: z.string().trim().min(1).max(120),
-  kind: z.enum(["metadata", "release_snapshot", "release_field"]),
-}).strict();
+export const assistantEvidenceSchema = z
+  .object({
+    id: z.string().trim().min(1).max(120),
+    kind: z.enum(["metadata", "release_snapshot", "release_field"]),
+  })
+  .strict();
 export type AssistantEvidence = z.infer<typeof assistantEvidenceSchema>;
 
-export const assistantReleaseEvidenceSchema = z.object({
-  resolution: z.enum(["upstream", "title_inferred", "unknown"]),
-  codec: z.enum(["upstream", "title_inferred", "unknown"]),
-  size: z.enum(["upstream", "unknown"]),
-  seeders: z.enum(["upstream", "unknown"]),
-  season: z.enum(["title_inferred", "unknown"]),
-}).strict();
-export type AssistantReleaseEvidence = z.infer<typeof assistantReleaseEvidenceSchema>;
+export const assistantReleaseEvidenceSchema = z
+  .object({
+    resolution: z.enum(["upstream", "title_inferred", "unknown"]),
+    codec: z.enum(["upstream", "title_inferred", "unknown"]),
+    size: z.enum(["upstream", "unknown"]),
+    seeders: z.enum(["upstream", "unknown"]),
+    season: z.enum(["title_inferred", "unknown"]),
+  })
+  .strict();
+export type AssistantReleaseEvidence = z.infer<
+  typeof assistantReleaseEvidenceSchema
+>;
 
-export const assistantRankedReleaseSchema = z.object({
-  id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/u),
-  title: z.string().trim().min(1).max(240),
-  indexer: z.string().trim().max(100),
-  protocol: z.enum(["torrent", "usenet"]),
-  size: z.number().nonnegative(),
-  seeders: z.number().int().nonnegative(),
-  leechers: z.number().int().nonnegative(),
-  grabs: z.number().int().nonnegative(),
-  ageDays: z.number().nonnegative(),
-  categories: z.array(z.string().trim().max(80)).max(20),
-  resolution: assistantResolutionSchema.optional(),
-  codec: z.string().trim().max(40).optional(),
-  /** Title-inferred season; the UI labels it as an inference. */
-  season: z.number().int().min(1).max(50).optional(),
-  freeleech: z.boolean(),
-  freeleechState: z.enum(["yes", "no", "unknown"]).optional(),
-  evidence: assistantReleaseEvidenceSchema.optional(),
-  rank: z.number().int().positive(),
-  reasonCodes: z.array(z.enum([
-    "WITHIN_SIZE_LIMIT",
-    "PREFERRED_RESOLUTION",
-    "PREFERRED_FREELEECH",
-    "MORE_SEEDERS",
-    "MATCHED_TITLE",
-    "SEEDERS_UNKNOWN",
-    "POSSIBLE_MATCH",
-  ])).max(12),
-  matchStatus: z.enum(["confirmed", "possible", "unknown"]),
-}).strict();
-export type AssistantRankedRelease = z.infer<typeof assistantRankedReleaseSchema>;
+export const assistantRankedReleaseSchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/u),
+    title: z.string().trim().min(1).max(240),
+    indexer: z.string().trim().max(100),
+    protocol: z.enum(["torrent", "usenet"]),
+    size: z.number().nonnegative(),
+    seeders: z.number().int().nonnegative(),
+    leechers: z.number().int().nonnegative(),
+    grabs: z.number().int().nonnegative(),
+    ageDays: z.number().nonnegative(),
+    categories: z.array(z.string().trim().max(80)).max(20),
+    resolution: assistantResolutionSchema.optional(),
+    codec: z.string().trim().max(40).optional(),
+    /** Title-inferred season; the UI labels it as an inference. */
+    season: z.number().int().min(1).max(50).optional(),
+    freeleech: z.boolean(),
+    freeleechState: z.enum(["yes", "no", "unknown"]).optional(),
+    evidence: assistantReleaseEvidenceSchema.optional(),
+    rank: z.number().int().positive(),
+    reasonCodes: z
+      .array(
+        z.enum([
+          "WITHIN_SIZE_LIMIT",
+          "PREFERRED_RESOLUTION",
+          "PREFERRED_FREELEECH",
+          "MORE_SEEDERS",
+          "MATCHED_TITLE",
+          "SEEDERS_UNKNOWN",
+          "POSSIBLE_MATCH",
+        ]),
+      )
+      .max(12),
+    matchStatus: z.enum(["confirmed", "possible", "unknown"]),
+  })
+  .strict();
+export type AssistantRankedRelease = z.infer<
+  typeof assistantRankedReleaseSchema
+>;
 
-export const assistantSourceSchema = z.object({
-  id: z.string().min(1).max(100),
-  title: z.string().max(240),
-  url: z.string().url().max(2048).refine(value => /^https?:\/\//u.test(value)),
-}).strict();
-export const assistantContentKindSchema = z.enum(['movie', 'series', 'variety', 'documentary', 'animation', 'unknown']);
+export const assistantSourceSchema = z
+  .object({
+    id: z.string().min(1).max(100),
+    title: z.string().max(240),
+    url: z
+      .string()
+      .url()
+      .max(2048)
+      .refine((value) => /^https?:\/\//u.test(value)),
+  })
+  .strict();
+export const assistantContentKindSchema = z.enum([
+  "movie",
+  "series",
+  "variety",
+  "documentary",
+  "animation",
+  "unknown",
+]);
 
-export const assistantRecommendationCardSchema = z.object({
-  cardId: z.string().regex(/^[A-Za-z0-9_-]{8,160}$/u),
-  mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
-  mediaType: assistantMediaTypeSchema,
-  title: z.string().trim().min(1).max(240),
-  originalTitle: z.string().trim().max(240).optional(),
-  year: z.string().trim().max(16).optional(),
-  genres: z.array(z.string().trim().max(40)).max(20),
-  summary: z.string().trim().max(900),
-  reason: z.string().trim().max(800),
-  evidenceIds: z.array(z.string().trim().min(1).max(120)).max(20),
-  constraintResults: z.array(assistantConstraintResultSchema).max(20),
-  availability: assistantAvailabilitySchema,
-  checkedAt: z.string().datetime().optional(),
-  snapshotId: z.string().regex(/^[A-Za-z0-9_-]{8,160}$/u).optional(),
-  expiresAt: z.string().datetime().optional(),
-  actionableUntil: z.string().datetime().optional(),
-  rankedReleases: z.array(assistantRankedReleaseSchema).max(3),
-  identityStatus: z.enum(['verified', 'unverified']).optional(),
-  sources: z.array(assistantSourceSchema).max(6).optional(),
-  contentKind: assistantContentKindSchema.optional(),
-}).strict();
-export type AssistantRecommendationCard = z.infer<typeof assistantRecommendationCardSchema>;
+export const assistantRecommendationCardSchema = z
+  .object({
+    cardId: z.string().regex(/^[A-Za-z0-9_-]{8,160}$/u),
+    mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+    mediaType: assistantMediaTypeSchema,
+    title: z.string().trim().min(1).max(240),
+    originalTitle: z.string().trim().max(240).optional(),
+    year: z.string().trim().max(16).optional(),
+    genres: z.array(z.string().trim().max(40)).max(20),
+    summary: z.string().trim().max(900),
+    reason: z.string().trim().max(800),
+    evidenceIds: z.array(z.string().trim().min(1).max(120)).max(20),
+    constraintResults: z.array(assistantConstraintResultSchema).max(20),
+    availability: assistantAvailabilitySchema,
+    checkedAt: z.string().datetime().optional(),
+    snapshotId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{8,160}$/u)
+      .optional(),
+    expiresAt: z.string().datetime().optional(),
+    actionableUntil: z.string().datetime().optional(),
+    rankedReleases: z.array(assistantRankedReleaseSchema).max(3),
+    identityStatus: z.enum(["verified", "unverified"]).optional(),
+    sources: z.array(assistantSourceSchema).max(6).optional(),
+    contentKind: assistantContentKindSchema.optional(),
+  })
+  .strict();
+export type AssistantRecommendationCard = z.infer<
+  typeof assistantRecommendationCardSchema
+>;
 
-export const assistantWarningSchema = z.object({
-  code: z.string().trim().min(1).max(64),
-  message: z.string().trim().min(1).max(300),
-  mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u).optional(),
-}).strict();
+export const assistantWarningSchema = z
+  .object({
+    code: z.string().trim().min(1).max(64),
+    message: z.string().trim().min(1).max(300),
+    mediaId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/u)
+      .optional(),
+  })
+  .strict();
 export type AssistantWarning = z.infer<typeof assistantWarningSchema>;
 
-export const assistantUsageSchema = z.object({
-  promptTokens: z.number().int().nonnegative().nullable(),
-  completionTokens: z.number().int().nonnegative().nullable(),
-  totalTokens: z.number().int().nonnegative().nullable(),
-  modelRequests: z.number().int().nonnegative(),
-  toolExecutions: z.number().int().nonnegative(),
-}).strict();
+export const assistantUsageSchema = z
+  .object({
+    promptTokens: z.number().int().nonnegative().nullable(),
+    completionTokens: z.number().int().nonnegative().nullable(),
+    totalTokens: z.number().int().nonnegative().nullable(),
+    modelRequests: z.number().int().nonnegative(),
+    toolExecutions: z.number().int().nonnegative(),
+  })
+  .strict();
 export type AssistantUsage = z.infer<typeof assistantUsageSchema>;
 
-export const assistantTurnResponseSchema = z.object({
-  conversationId: z.string().uuid(),
-  turnId: z.string().uuid(),
-  clientTurnId: z.string().uuid(),
-  text: z.string().max(4_000),
-  preferences: assistantPreferencesSchema,
-  recommendations: z.array(assistantRecommendationCardSchema).max(5),
-  warnings: z.array(assistantWarningSchema).max(20),
-  usage: assistantUsageSchema.optional(),
-  phase: z.enum(['verifying', 'checking', 'complete']).optional(),
-  pendingRecommendations: z.array(assistantRecommendationCardSchema).max(5).optional(),
-}).strict();
+export const assistantTurnResponseSchema = z
+  .object({
+    conversationId: z.string().uuid(),
+    turnId: z.string().uuid(),
+    clientTurnId: z.string().uuid(),
+    text: z.string().max(4_000),
+    preferences: assistantPreferencesSchema,
+    recommendations: z.array(assistantRecommendationCardSchema).max(5),
+    warnings: z.array(assistantWarningSchema).max(20),
+    usage: assistantUsageSchema.optional(),
+    phase: z.enum(["verifying", "checking", "complete"]).optional(),
+    pendingRecommendations: z
+      .array(assistantRecommendationCardSchema)
+      .max(5)
+      .optional(),
+  })
+  .strict();
 export type AssistantTurnResponse = z.infer<typeof assistantTurnResponseSchema>;
 
-export const assistantStreamEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('snapshot'), data: assistantTurnResponseSchema }).strict(),
-  z.object({ type: z.literal('error'), error: z.string().max(300), code: z.string().max(64) }).strict(),
+export const assistantStreamEventSchema = z.discriminatedUnion("type", [
+  z
+    .object({ type: z.literal("snapshot"), data: assistantTurnResponseSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("error"),
+      error: z.string().max(300),
+      code: z.string().max(64),
+    })
+    .strict(),
 ]);
 export type AssistantStreamEvent = z.infer<typeof assistantStreamEventSchema>;
 
@@ -211,23 +302,40 @@ export type AssistantErrorBody = {
 };
 
 /** The small final payload the model is allowed to author. */
-export const assistantModelOutputSchema = z.object({
-  text: z.string().trim().max(4_000).default(""),
-  preferences: assistantPreferencesPatchSchema.optional(),
-  recommendations: z.array(z.object({
-    mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
-    reason: z.string().trim().max(800).default(""),
-    evidenceIds: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
-    constraintResults: z.array(assistantConstraintResultSchema).max(20).default([]),
-  }).strict()).max(5).default([]),
-  warnings: z.array(assistantWarningSchema).max(20).default([]),
-}).strict();
+export const assistantModelOutputSchema = z
+  .object({
+    text: z.string().trim().max(4_000).default(""),
+    preferences: assistantPreferencesPatchSchema.optional(),
+    recommendations: z
+      .array(
+        z
+          .object({
+            mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+            reason: z.string().trim().max(800).default(""),
+            evidenceIds: z
+              .array(z.string().trim().min(1).max(120))
+              .max(20)
+              .default([]),
+            constraintResults: z
+              .array(assistantConstraintResultSchema)
+              .max(20)
+              .default([]),
+          })
+          .strict(),
+      )
+      .max(5)
+      .default([]),
+    warnings: z.array(assistantWarningSchema).max(20).default([]),
+  })
+  .strict();
 export type AssistantModelOutput = z.infer<typeof assistantModelOutputSchema>;
 
 export function defaultAssistantPreferences(): AssistantPreferences {
   return assistantPreferencesSchema.parse({});
 }
 
-export function normalizeAssistantPreferences(value: unknown): AssistantPreferences {
+export function normalizeAssistantPreferences(
+  value: unknown,
+): AssistantPreferences {
   return assistantPreferencesSchema.parse(value);
 }

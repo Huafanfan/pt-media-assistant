@@ -10,18 +10,24 @@ export async function startServer(): Promise<{ close: () => Promise<void> }> {
   // container deployment sets PT_MEDIA_DATA_DIR=/data explicitly. Only the
   // process entry point applies this default so test configs stay in memory.
   const dataDir = config.dataDir ?? resolve(process.cwd(), ".data", "app");
-  const pairing = new PairingService({ pairingCode: config.pairingCode || undefined });
+  const pairing = new PairingService({
+    pairingCode: config.pairingCode || undefined,
+  });
   const app = await createApp({ config: { ...config, dataDir }, pairing });
   await app.listen({ host: config.host, port: config.port });
 
   if (!config.trustLan) {
     // Pairing remains available as an opt-out fallback for deployments that
     // explicitly disable trusted-LAN auto sessions.
-    process.stdout.write(`PT Media Assistant pairing code: ${pairing.pairingCode}\n`);
+    process.stdout.write(
+      `PT Media Assistant pairing code: ${pairing.pairingCode}\n`,
+    );
   } else {
     process.stdout.write("PT Media Assistant trusted-LAN access enabled\n");
   }
-  process.stdout.write(`PT Media Assistant listening on ${config.host}:${config.port}\n`);
+  process.stdout.write(
+    `PT Media Assistant listening on ${config.host}:${config.port}\n`,
+  );
 
   let closing = false;
   const close = async (): Promise<void> => {
@@ -37,7 +43,10 @@ export async function startServer(): Promise<{ close: () => Promise<void> }> {
   return { close };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   void startServer().catch(() => {
     // Keep boot failures generic: configuration may contain provider URLs or
     // other sensitive details that should never be emitted to stdout/stderr.

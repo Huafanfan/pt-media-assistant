@@ -13,10 +13,26 @@ const base: TorrentSummary = {
   downloadSpeed: 5 * 1024 ** 2,
   uploadSpeed: 1024,
   eta: 600,
-  savePath: "/data/pt"
+  savePath: "/data/pt",
 };
-const paused: TorrentSummary = { ...base, hash: "b".repeat(40), name: "Old Movie 1080p", progress: 0.2, state: "pausedDL", downloadSpeed: 0, eta: 0 };
-const completed: TorrentSummary = { ...base, hash: "c".repeat(40), name: "Finished Show", progress: 1, state: "uploading", downloadSpeed: 0, eta: 0 };
+const paused: TorrentSummary = {
+  ...base,
+  hash: "b".repeat(40),
+  name: "Old Movie 1080p",
+  progress: 0.2,
+  state: "pausedDL",
+  downloadSpeed: 0,
+  eta: 0,
+};
+const completed: TorrentSummary = {
+  ...base,
+  hash: "c".repeat(40),
+  name: "Finished Show",
+  progress: 1,
+  state: "uploading",
+  downloadSpeed: 0,
+  eta: 0,
+};
 
 function renderView(overrides: Partial<Parameters<typeof TaskView>[0]> = {}) {
   const onAction = vi.fn(async () => true);
@@ -31,7 +47,7 @@ function renderView(overrides: Partial<Parameters<typeof TaskView>[0]> = {}) {
       onRefresh={onRefresh}
       onAction={onAction}
       {...overrides}
-    />
+    />,
   );
   return { onAction, onRefresh };
 }
@@ -57,11 +73,17 @@ describe("下载任务视图", () => {
 
     const downloadingRow = screen.getByText("Interstellar 2160p").closest("li");
     expect(downloadingRow).not.toBeNull();
-    await user.click(within(downloadingRow as HTMLElement).getByRole("button", { name: "暂停" }));
+    await user.click(
+      within(downloadingRow as HTMLElement).getByRole("button", {
+        name: "暂停",
+      }),
+    );
     expect(onAction).toHaveBeenCalledWith("pause", [base.hash]);
 
     const pausedRow = screen.getByText("Old Movie 1080p").closest("li");
-    await user.click(within(pausedRow as HTMLElement).getByRole("button", { name: "继续" }));
+    await user.click(
+      within(pausedRow as HTMLElement).getByRole("button", { name: "继续" }),
+    );
     expect(onAction).toHaveBeenCalledWith("resume", [paused.hash]);
   });
 
@@ -69,14 +91,20 @@ describe("下载任务视图", () => {
     const user = userEvent.setup();
     const { onAction } = renderView();
 
-    const row = screen.getByText("Interstellar 2160p").closest("li") as HTMLElement;
+    const row = screen
+      .getByText("Interstellar 2160p")
+      .closest("li") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "移除" }));
     expect(onAction).not.toHaveBeenCalled();
-    expect(within(row).getByText("仅移除任务，保留已下载文件")).toBeInTheDocument();
+    expect(
+      within(row).getByText("仅移除任务，保留已下载文件"),
+    ).toBeInTheDocument();
 
     await user.click(within(row).getByRole("button", { name: "取消" }));
     expect(onAction).not.toHaveBeenCalled();
-    expect(within(row).getByRole("button", { name: "移除" })).toBeInTheDocument();
+    expect(
+      within(row).getByRole("button", { name: "移除" }),
+    ).toBeInTheDocument();
 
     await user.click(within(row).getByRole("button", { name: "移除" }));
     await user.click(within(row).getByRole("button", { name: "确认移除" }));
@@ -85,7 +113,9 @@ describe("下载任务视图", () => {
 
   it("disables task controls while an action is pending", () => {
     renderView({ actionPending: true });
-    for (const button of screen.getAllByRole("button", { name: /暂停|继续|移除/ })) {
+    for (const button of screen.getAllByRole("button", {
+      name: /暂停|继续|移除/,
+    })) {
       expect(button).toBeDisabled();
     }
   });
@@ -98,10 +128,17 @@ describe("下载任务视图", () => {
   it("lists family-shared seen records and can unmark them", async () => {
     const user = userEvent.setup();
     const onUnmarkSeen = vi.fn();
-    const entry = { mediaId: "1293000", mediaType: "movie" as const, title: "星际穿越", markedAt: "2026-09-12T10:00:00.000Z" };
+    const entry = {
+      mediaId: "1293000",
+      mediaType: "movie" as const,
+      title: "星际穿越",
+      markedAt: "2026-09-12T10:00:00.000Z",
+    };
     renderView({ seenItems: [entry], onUnmarkSeen });
 
-    expect(screen.getByRole("heading", { name: "已看记录" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "已看记录" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "取消已看" }));
     expect(onUnmarkSeen).toHaveBeenCalledWith(entry);
   });

@@ -21,7 +21,7 @@ export function torrentStateLabel(state: string): string {
     moving: "移动中",
     allocating: "分配空间",
     error: "错误",
-    missingFiles: "文件缺失"
+    missingFiles: "文件缺失",
   };
   return labels[state] ?? state;
 }
@@ -39,7 +39,8 @@ export function formatRate(bytesPerSecond: number): string {
 }
 
 export function formatEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0 || seconds >= 8_640_000) return "未知";
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds >= 8_640_000)
+    return "未知";
   if (seconds < 60) return `${Math.ceil(seconds)} 秒`;
   if (seconds < 3_600) return `${Math.ceil(seconds / 60)} 分钟`;
   return `${Math.ceil(seconds / 3_600)} 小时`;
@@ -51,12 +52,18 @@ export function isPausedTorrent(state: string): boolean {
 
 /** Active means "still downloading or transferring", not merely unfinished. */
 export function isActiveTorrent(torrent: TorrentSummary): boolean {
-  return torrent.progress < 1 || /(?:DL|downloading|queued)/iu.test(torrent.state);
+  return (
+    torrent.progress < 1 || /(?:DL|downloading|queued)/iu.test(torrent.state)
+  );
 }
 
 export function activeTorrents(torrents: TorrentSummary[]): TorrentSummary[] {
   return torrents
     .filter(isActiveTorrent)
-    .sort((left, right) => right.downloadSpeed - left.downloadSpeed || left.name.localeCompare(right.name))
+    .sort(
+      (left, right) =>
+        right.downloadSpeed - left.downloadSpeed ||
+        left.name.localeCompare(right.name),
+    )
     .slice(0, 3);
 }

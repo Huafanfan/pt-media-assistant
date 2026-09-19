@@ -60,7 +60,10 @@ function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
   return value || undefined;
 }
 
-function readSecretFile(env: NodeJS.ProcessEnv, name: string): string | undefined {
+function readSecretFile(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
   const path = readEnv(env, name);
   if (!path || !path.startsWith("/") || path.includes("\0")) return undefined;
   try {
@@ -100,7 +103,13 @@ function parseUrl(value: string, field: string): string {
  */
 export function discoverProwlarrApiKey(
   env: NodeJS.ProcessEnv = process.env,
-  configPath = join(homedir(), "Library", "Application Support", "Prowlarr", "config.xml"),
+  configPath = join(
+    homedir(),
+    "Library",
+    "Application Support",
+    "Prowlarr",
+    "config.xml",
+  ),
 ): string | undefined {
   const fromEnv = readEnv(env, "PROWLARR_API_KEY");
   if (fromEnv) return fromEnv;
@@ -134,7 +143,11 @@ function parseBoolean(value: string | undefined, fallback = false): boolean {
   return /^(?:1|true|yes|on)$/iu.test(value);
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number, field: string): number {
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  field: string,
+): number {
   if (!value) return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
@@ -145,9 +158,18 @@ function parseAiBaseUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
     const parsed = new URL(value);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) return undefined;
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    )
+      return undefined;
     return parsed.toString().replace(/\/$/u, "");
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 function parseNasCheckMode(value: string | undefined): NasCheckMode {
@@ -173,11 +195,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("PT_MEDIA_NAS_PATH must be an absolute local path");
   }
   const nasSentinelPath = readEnv(env, "PT_MEDIA_NAS_SENTINEL_PATH");
-  if (nasSentinelPath && (!nasSentinelPath.startsWith("/") || nasSentinelPath.includes("\0"))) {
-    throw new Error("PT_MEDIA_NAS_SENTINEL_PATH must be an absolute local path");
+  if (
+    nasSentinelPath &&
+    (!nasSentinelPath.startsWith("/") || nasSentinelPath.includes("\0"))
+  ) {
+    throw new Error(
+      "PT_MEDIA_NAS_SENTINEL_PATH must be an absolute local path",
+    );
   }
   const nasStatusPath = readEnv(env, "PT_MEDIA_NAS_STATUS_PATH");
-  if (nasStatusPath && (!nasStatusPath.startsWith("/") || nasStatusPath.includes("\0"))) {
+  if (
+    nasStatusPath &&
+    (!nasStatusPath.startsWith("/") || nasStatusPath.includes("\0"))
+  ) {
     throw new Error("PT_MEDIA_NAS_STATUS_PATH must be an absolute local path");
   }
 
@@ -193,14 +223,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Select URL and credential as one pair. DeepSeek takes precedence over
   // the previous gateways, but a partial DeepSeek configuration must not
   // borrow a URL or key from either of them.
-  const useDeepSeek = Boolean(readEnv(env, "DS_BASE_URL") || readEnv(env, "DS_AUTH_TOKEN") || readEnv(env, "DS_AUTH_TOKEN_FILE"));
-  const useIvan = !useDeepSeek && Boolean(readEnv(env, "IVAN_ONLINE_API_URL") || readEnv(env, "IVAN_ONLINE_API_KEY") || readEnv(env, "IVAN_ONLINE_API_KEY_FILE"));
-  const aiBaseUrl = parseAiBaseUrl(readEnv(env, useDeepSeek ? "DS_BASE_URL" : useIvan ? "IVAN_ONLINE_API_URL" : "TRANS_STATION_BASE_URL"));
+  const useDeepSeek = Boolean(
+    readEnv(env, "DS_BASE_URL") ||
+      readEnv(env, "DS_AUTH_TOKEN") ||
+      readEnv(env, "DS_AUTH_TOKEN_FILE"),
+  );
+  const useIvan =
+    !useDeepSeek &&
+    Boolean(
+      readEnv(env, "IVAN_ONLINE_API_URL") ||
+        readEnv(env, "IVAN_ONLINE_API_KEY") ||
+        readEnv(env, "IVAN_ONLINE_API_KEY_FILE"),
+    );
+  const aiBaseUrl = parseAiBaseUrl(
+    readEnv(
+      env,
+      useDeepSeek
+        ? "DS_BASE_URL"
+        : useIvan
+          ? "IVAN_ONLINE_API_URL"
+          : "TRANS_STATION_BASE_URL",
+    ),
+  );
   const aiApiKey = useDeepSeek
-    ? readEnv(env, "DS_AUTH_TOKEN") ?? readSecretFile(env, "DS_AUTH_TOKEN_FILE")
+    ? (readEnv(env, "DS_AUTH_TOKEN") ??
+      readSecretFile(env, "DS_AUTH_TOKEN_FILE"))
     : useIvan
-      ? readEnv(env, "IVAN_ONLINE_API_KEY") ?? readSecretFile(env, "IVAN_ONLINE_API_KEY_FILE")
-      : readEnv(env, "TRANS_STATION_API_KEY") ?? readSecretFile(env, "TRANS_STATION_API_KEY_FILE");
+      ? (readEnv(env, "IVAN_ONLINE_API_KEY") ??
+        readSecretFile(env, "IVAN_ONLINE_API_KEY_FILE"))
+      : (readEnv(env, "TRANS_STATION_API_KEY") ??
+        readSecretFile(env, "TRANS_STATION_API_KEY_FILE"));
   const aiModel = readEnv(env, "PT_MEDIA_AI_MODEL") ?? DEFAULT_AI_MODEL;
   const aiProviderTimeoutMs = parsePositiveInteger(
     readEnv(env, "PT_MEDIA_AI_PROVIDER_TIMEOUT_MS"),
@@ -216,13 +268,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     host: readEnv(env, "PT_MEDIA_HOST") ?? DEFAULT_HOST,
     port: parsePort(readEnv(env, "PT_MEDIA_PORT")),
-    prowlarrUrl: parseUrl(readEnv(env, "PROWLARR_URL") ?? DEFAULT_PROWLARR_URL, "PROWLARR_URL"),
+    prowlarrUrl: parseUrl(
+      readEnv(env, "PROWLARR_URL") ?? DEFAULT_PROWLARR_URL,
+      "PROWLARR_URL",
+    ),
     prowlarrApiKey: discoverProwlarrApiKey(env),
     prowlarrProxyToken: readSecretFile(env, "PROWLARR_PROXY_TOKEN_FILE"),
-    qbittorrentUrl: parseUrl(readEnv(env, "QBITTORRENT_URL") ?? DEFAULT_QBITTORRENT_URL, "QBITTORRENT_URL"),
+    qbittorrentUrl: parseUrl(
+      readEnv(env, "QBITTORRENT_URL") ?? DEFAULT_QBITTORRENT_URL,
+      "QBITTORRENT_URL",
+    ),
     nasPath,
     nasCheckMode: parseNasCheckMode(readEnv(env, "PT_MEDIA_NAS_CHECK_MODE")),
-    nasSentinelName: parseNasSentinelName(readEnv(env, "PT_MEDIA_NAS_SENTINEL")),
+    nasSentinelName: parseNasSentinelName(
+      readEnv(env, "PT_MEDIA_NAS_SENTINEL"),
+    ),
     ...(nasSentinelPath ? { nasSentinelPath } : {}),
     ...(nasStatusPath ? { nasStatusPath } : {}),
     pairingCode: parsePairingCode(env),
@@ -238,8 +298,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     aiProviderTimeoutMs,
     aiTurnTimeoutMs,
     aiWebEnabled: parseBoolean(readEnv(env, "PT_MEDIA_AI_WEB_ENABLED")),
-    tavilyApiKey: readEnv(env, "TAVILY_API_KEY") ?? readSecretFile(env, "TAVILY_API_KEY_FILE"),
+    tavilyApiKey:
+      readEnv(env, "TAVILY_API_KEY") ??
+      readSecretFile(env, "TAVILY_API_KEY_FILE"),
     ...(dataDir ? { dataDir } : {}),
-    ...(configuredOrigin ? { configuredOrigin: parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN") } : {}),
+    ...(configuredOrigin
+      ? { configuredOrigin: parseUrl(configuredOrigin, "PT_MEDIA_ORIGIN") }
+      : {}),
   };
 }

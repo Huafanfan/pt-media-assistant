@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
 
-import type { ParsedIntent, ReleaseSummary, SearchResponse } from "../shared/contracts.js";
+import type {
+  ParsedIntent,
+  ReleaseSummary,
+  SearchResponse,
+} from "../shared/contracts.js";
 import { UPSTREAM_TIMEOUT_MS } from "./config.js";
 
 export type JsonObject = Record<string, unknown>;
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export class UpstreamError extends Error {
   public constructor(message = "Upstream service unavailable") {
@@ -51,7 +58,8 @@ export class ReleaseCache {
     this.ttlMs = options.ttlMs ?? 15 * 60 * 1000;
     this.maxEntries = options.maxEntries ?? 10_000;
     this.now = options.now ?? Date.now;
-    this.idFactory = options.idFactory ?? (() => randomBytes(18).toString("base64url"));
+    this.idFactory =
+      options.idFactory ?? (() => randomBytes(18).toString("base64url"));
   }
 
   public put(release: JsonObject): string {
@@ -86,7 +94,10 @@ export class ReleaseCache {
   public retain(id: string, expiresAt: number): boolean {
     if (!this.get(id)) return false;
     const entry = this.entries.get(id)!;
-    entry.expiresAt = Math.max(entry.expiresAt, Math.min(expiresAt, this.now() + 24 * 60 * 60 * 1000));
+    entry.expiresAt = Math.max(
+      entry.expiresAt,
+      Math.min(expiresAt, this.now() + 24 * 60 * 60 * 1000),
+    );
     return true;
   }
 
@@ -123,9 +134,13 @@ function integerValue(value: unknown, fallback = 0): number {
   return Math.max(0, Math.floor(numberValue(value, fallback)));
 }
 
-function getRawObjectValue(raw: JsonObject, ...keys: string[]): ProwlarrJsonValue | undefined {
+function getRawObjectValue(
+  raw: JsonObject,
+  ...keys: string[]
+): ProwlarrJsonValue | undefined {
   for (const key of keys) {
-    if (raw[key] !== undefined && raw[key] !== null) return asJsonValue(raw[key]);
+    if (raw[key] !== undefined && raw[key] !== null)
+      return asJsonValue(raw[key]);
   }
   return undefined;
 }
@@ -140,9 +155,16 @@ type ProwlarrJsonValue =
   | { [key: string]: ProwlarrJsonValue };
 
 function asJsonValue(value: unknown): ProwlarrJsonValue | undefined {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
+    return value;
   if (Array.isArray(value)) return value as ProwlarrJsonValue[];
-  if (typeof value === "object") return value as { [key: string]: ProwlarrJsonValue };
+  if (typeof value === "object")
+    return value as { [key: string]: ProwlarrJsonValue };
   return undefined;
 }
 
@@ -154,18 +176,38 @@ function normalizeResolution(value: unknown): ReleaseSummary["resolution"] {
   return undefined;
 }
 
-function inferResolution(title: string, raw: JsonObject): ReleaseSummary["resolution"] {
-  return normalizeResolution(getRawObjectValue(raw, "resolution", "quality")) ?? normalizeResolution(title);
+function inferResolution(
+  title: string,
+  raw: JsonObject,
+): ReleaseSummary["resolution"] {
+  return (
+    normalizeResolution(getRawObjectValue(raw, "resolution", "quality")) ??
+    normalizeResolution(title)
+  );
 }
 
 function inferCodec(title: string, raw: JsonObject): string | undefined {
-  const direct = boundedString(getRawObjectValue(raw, "codec", "videoCodec"), "", 40);
+  const direct = boundedString(
+    getRawObjectValue(raw, "codec", "videoCodec"),
+    "",
+    40,
+  );
   if (direct) return direct;
   const match = /\b(?:x26[45]|h\.?26[45]|hevc|av1|avc)\b/iu.exec(title);
   return match?.[0]?.toUpperCase();
 }
 
-const CHINESE_DIGITS: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const CHINESE_DIGITS: Record<string, number> = {
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+};
 
 function parseSeasonNumber(value: string): number | undefined {
   if (/^\d{1,2}$/u.test(value)) {
@@ -174,9 +216,14 @@ function parseSeasonNumber(value: string): number | undefined {
   }
   if (!/^[一二三四五六七八九十]{1,3}$/u.test(value)) return undefined;
   if (value === "十") return 10;
-  if (value.length === 2 && value.startsWith("十")) return 10 + (CHINESE_DIGITS[value[1]!] ?? 0);
-  if (value.length === 2 && value.endsWith("十")) return (CHINESE_DIGITS[value[0]!] ?? 0) * 10;
-  if (value.length === 3 && value[1] === "十") return (CHINESE_DIGITS[value[0]!] ?? 0) * 10 + (CHINESE_DIGITS[value[2]!] ?? 0);
+  if (value.length === 2 && value.startsWith("十"))
+    return 10 + (CHINESE_DIGITS[value[1]!] ?? 0);
+  if (value.length === 2 && value.endsWith("十"))
+    return (CHINESE_DIGITS[value[0]!] ?? 0) * 10;
+  if (value.length === 3 && value[1] === "十")
+    return (
+      (CHINESE_DIGITS[value[0]!] ?? 0) * 10 + (CHINESE_DIGITS[value[2]!] ?? 0)
+    );
   return CHINESE_DIGITS[value];
 }
 
@@ -191,7 +238,13 @@ export function inferSeason(title: string): number | undefined {
   const token = english?.[1] ?? chinese?.[1];
   if (token === undefined) return undefined;
   const parsed = parseSeasonNumber(token);
-  if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 50) return undefined;
+  if (
+    parsed === undefined ||
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > 50
+  )
+    return undefined;
   return parsed;
 }
 
@@ -208,44 +261,76 @@ function categoryNames(value: unknown): string[] {
     const object = item as JsonObject;
     const name = boundedString(object.name, "", 80);
     if (name) names.add(name);
-    if (Array.isArray(object.subCategories)) object.subCategories.forEach(visit);
+    if (Array.isArray(object.subCategories))
+      object.subCategories.forEach(visit);
   };
   value.forEach(visit);
   return [...names].slice(0, 20);
 }
 
 function isFreeleech(raw: JsonObject): boolean {
-  if (raw.freeleech === true || raw.isFreeleech === true || raw.freeLeech === true) return true;
+  if (
+    raw.freeleech === true ||
+    raw.isFreeleech === true ||
+    raw.freeLeech === true
+  )
+    return true;
   const flags = raw.indexerFlags;
-  return Array.isArray(flags) && flags.some((flag) => {
-    const label = stringValue(flag).toLowerCase();
-    return label === "freeleech" || label === "free-leech" || label === "免费" || label === "免费下载";
-  });
+  return (
+    Array.isArray(flags) &&
+    flags.some((flag) => {
+      const label = stringValue(flag).toLowerCase();
+      return (
+        label === "freeleech" ||
+        label === "free-leech" ||
+        label === "免费" ||
+        label === "免费下载"
+      );
+    })
+  );
 }
 
 function freeleechState(raw: JsonObject): "yes" | "no" | "unknown" {
   if (isFreeleech(raw)) return "yes";
-  if ([raw.freeleech, raw.isFreeleech, raw.freeLeech].some((value) => value === false)) return "no";
+  if (
+    [raw.freeleech, raw.isFreeleech, raw.freeLeech].some(
+      (value) => value === false,
+    )
+  )
+    return "no";
   return "unknown";
 }
 
 function hasNumber(value: unknown): boolean {
-  return (typeof value === "number" || (typeof value === "string" && value.trim() !== ""))
-    && Number.isFinite(Number(value)) && Number(value) >= 0;
+  return (
+    (typeof value === "number" ||
+      (typeof value === "string" && value.trim() !== "")) &&
+    Number.isFinite(Number(value)) &&
+    Number(value) >= 0
+  );
 }
 
 /** Reduce one full Prowlarr ReleaseResource to the browser-safe contract. */
 export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
-  const title = boundedString(getRawObjectValue(raw, "title", "sortTitle", "fileName"), "Untitled release");
-  const ageDays = raw.age === undefined
-    ? numberValue(raw.ageHours, 0) / 24
-    : numberValue(raw.age);
-  const protocol = stringValue(raw.protocol).toLowerCase() === "usenet" ? "usenet" : "torrent";
+  const title = boundedString(
+    getRawObjectValue(raw, "title", "sortTitle", "fileName"),
+    "Untitled release",
+  );
+  const ageDays =
+    raw.age === undefined
+      ? numberValue(raw.ageHours, 0) / 24
+      : numberValue(raw.age);
+  const protocol =
+    stringValue(raw.protocol).toLowerCase() === "usenet" ? "usenet" : "torrent";
   const season = inferSeason(title);
   return {
     id,
     title,
-    indexer: boundedString(getRawObjectValue(raw, "indexer", "indexerName"), "Unknown indexer", 100),
+    indexer: boundedString(
+      getRawObjectValue(raw, "indexer", "indexerName"),
+      "Unknown indexer",
+      100,
+    ),
     protocol,
     size: numberValue(raw.size),
     seeders: integerValue(raw.seeders),
@@ -253,14 +338,26 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
     grabs: integerValue(raw.grabs),
     ageDays: Math.round(ageDays * 100) / 100,
     categories: categoryNames(raw.categories),
-    ...(inferResolution(title, raw) ? { resolution: inferResolution(title, raw) } : {}),
+    ...(inferResolution(title, raw)
+      ? { resolution: inferResolution(title, raw) }
+      : {}),
     ...(inferCodec(title, raw) ? { codec: inferCodec(title, raw) } : {}),
     ...(season ? { season } : {}),
     freeleech: isFreeleech(raw),
     freeleechState: freeleechState(raw),
     evidence: {
-      resolution: normalizeResolution(getRawObjectValue(raw, "resolution", "quality")) ? "upstream" : inferResolution(title, raw) ? "title_inferred" : "unknown",
-      codec: boundedString(getRawObjectValue(raw, "codec", "videoCodec")) ? "upstream" : inferCodec(title, raw) ? "title_inferred" : "unknown",
+      resolution: normalizeResolution(
+        getRawObjectValue(raw, "resolution", "quality"),
+      )
+        ? "upstream"
+        : inferResolution(title, raw)
+          ? "title_inferred"
+          : "unknown",
+      codec: boundedString(getRawObjectValue(raw, "codec", "videoCodec"))
+        ? "upstream"
+        : inferCodec(title, raw)
+          ? "title_inferred"
+          : "unknown",
       size: hasNumber(raw.size) ? "upstream" : "unknown",
       seeders: hasNumber(raw.seeders) ? "upstream" : "unknown",
       season: season ? "title_inferred" : "unknown",
@@ -268,7 +365,10 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
   };
 }
 
-export function sanitizeReleases(rawReleases: unknown[], cache: ReleaseCache): ReleaseSummary[] {
+export function sanitizeReleases(
+  rawReleases: unknown[],
+  cache: ReleaseCache,
+): ReleaseSummary[] {
   const summaries: ReleaseSummary[] = [];
   for (const value of rawReleases) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
@@ -280,16 +380,25 @@ export function sanitizeReleases(rawReleases: unknown[], cache: ReleaseCache): R
 }
 
 function matchesIntent(release: ReleaseSummary, intent: ParsedIntent): boolean {
-  if (intent.maxSizeBytes !== undefined && (release.evidence?.size !== "upstream" || release.size > intent.maxSizeBytes)) return false;
+  if (
+    intent.maxSizeBytes !== undefined &&
+    (release.evidence?.size !== "upstream" ||
+      release.size > intent.maxSizeBytes)
+  )
+    return false;
   if (intent.freeleechOnly && !release.freeleech) return false;
   // A requested resolution is a hard constraint. Unknown-resolution entries
   // (for example soundtracks or books) must not leak into a 4K/1080p result.
-  if (intent.resolution && release.resolution !== intent.resolution) return false;
+  if (intent.resolution && release.resolution !== intent.resolution)
+    return false;
   return true;
 }
 
 function asReleaseArray(value: unknown): JsonObject[] {
-  if (Array.isArray(value)) return value.filter((item): item is JsonObject => Boolean(item && typeof item === "object" && !Array.isArray(item)));
+  if (Array.isArray(value))
+    return value.filter((item): item is JsonObject =>
+      Boolean(item && typeof item === "object" && !Array.isArray(item)),
+    );
   if (value && typeof value === "object") {
     const releases = (value as JsonObject).releases;
     if (Array.isArray(releases)) return asReleaseArray(releases);
@@ -327,7 +436,10 @@ export class ProwlarrClient {
     return new URL(path, `${this.baseUrl}/`);
   }
 
-  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
+  private async request(
+    path: string,
+    init: RequestInit = {},
+  ): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const headers = new Headers(init.headers);
@@ -337,7 +449,9 @@ export class ProwlarrClient {
       const response = await this.fetchImpl(this.endpoint(path), {
         ...init,
         headers,
-        signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
+        signal: init.signal
+          ? AbortSignal.any([controller.signal, init.signal])
+          : controller.signal,
       });
       if (init.signal?.aborted) throw new UpstreamCancelledError();
       if (!response.ok) throw new UpstreamError();
@@ -359,20 +473,32 @@ export class ProwlarrClient {
     }
   }
 
-  public async search(intent: ParsedIntent, limit = 20, options: { signal?: AbortSignal } = {}): Promise<SearchResponse> {
+  public async search(
+    intent: ParsedIntent,
+    limit = 20,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SearchResponse> {
     const startedAt = Date.now();
     const endpoint = this.endpoint("/api/v1/search");
     endpoint.searchParams.set("query", intent.searchTerm);
     endpoint.searchParams.set("type", "search");
-    endpoint.searchParams.set("limit", String(Math.min(50, Math.max(1, Math.floor(limit)))));
+    endpoint.searchParams.set(
+      "limit",
+      String(Math.min(50, Math.max(1, Math.floor(limit)))),
+    );
     endpoint.searchParams.set("offset", "0");
 
-    const payload = await this.request(endpoint.pathname + endpoint.search, { method: "GET", signal: options.signal });
+    const payload = await this.request(endpoint.pathname + endpoint.search, {
+      method: "GET",
+      signal: options.signal,
+    });
     const rawReleases = asReleaseArray(payload);
     const all = sanitizeReleases(rawReleases, this.cache);
     const releases = all
       .filter((release) => matchesIntent(release, intent))
-      .sort((left, right) => right.seeders - left.seeders || left.size - right.size);
+      .sort(
+        (left, right) => right.seeders - left.seeders || left.size - right.size,
+      );
     return {
       query: intent.searchTerm,
       intent,
@@ -382,7 +508,10 @@ export class ProwlarrClient {
     };
   }
 
-  public getRelease(releaseId: string): { summary: ReleaseSummary; raw: JsonObject } {
+  public getRelease(releaseId: string): {
+    summary: ReleaseSummary;
+    raw: JsonObject;
+  } {
     const raw = this.cache.get(releaseId);
     if (!raw) throw new ReleaseNotFoundError();
     return { raw, summary: sanitizeRelease(raw, releaseId) };
@@ -396,7 +525,9 @@ export class ProwlarrClient {
     for (const id of ids) this.cache.delete(id);
   }
 
-  public hasRelease(id: string): boolean { return Boolean(this.cache.get(id)); }
+  public hasRelease(id: string): boolean {
+    return Boolean(this.cache.get(id));
+  }
 
   /**
    * Prowlarr's GrabRelease contract is POST /api/v1/search with one complete

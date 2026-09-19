@@ -2,7 +2,13 @@ import { Compass, ListTodo, Search, Sparkles } from "lucide-react";
 
 export type AppMode = "discover" | "search" | "tasks" | "assistant";
 
-export function ModeSwitch({ mode, onChange }: { mode: AppMode; onChange: (mode: AppMode) => void }) {
+export function ModeSwitch({
+  mode,
+  onChange,
+}: {
+  mode: AppMode;
+  onChange: (mode: AppMode) => void;
+}) {
   return (
     <div className="mode-switch" role="tablist" aria-label="浏览方式">
       <button

@@ -15,7 +15,9 @@
   min-width: 0;
   color: var(--discovery-text);
   background: var(--discovery-black);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -120,7 +122,10 @@
 
 .discovery-item-button {
   display: grid;
-  grid-template-columns: clamp(76px, 9vw, 112px) 58px minmax(0, 1fr) minmax(72px, auto) 24px;
+  grid-template-columns: clamp(76px, 9vw, 112px) 58px minmax(0, 1fr) minmax(
+      72px,
+      auto
+    ) 24px;
   align-items: center;
   width: calc(100% - 24px);
   min-width: 0;
@@ -131,7 +136,9 @@
   border-bottom-color: var(--discovery-divider);
   background: transparent;
   text-align: left;
-  transition: background-color 180ms ease, border-color 180ms ease;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease;
 }
 
 .discovery-item-button:hover {
@@ -822,7 +829,9 @@
   border-bottom-color: var(--discovery-divider);
   background: transparent;
   text-align: left;
-  transition: background-color 160ms ease, border-color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
 }
 
 .discovery-release-option:hover:not(:disabled) {
@@ -1107,7 +1116,9 @@
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 9px;
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-  transition: border-color 160ms ease, transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
 }
 
 .actor-work-copy {
@@ -1342,7 +1353,10 @@
   }
 
   .discovery-item-button {
-    grid-template-columns: clamp(68px, 12vw, 86px) 54px minmax(0, 1fr) minmax(72px, auto) 24px;
+    grid-template-columns: clamp(68px, 12vw, 86px) 54px minmax(0, 1fr) minmax(
+        72px,
+        auto
+      ) 24px;
   }
 
   .discovery-item-poster {
@@ -1375,7 +1389,6 @@
     width: 96px;
     height: 140px;
   }
-
 }
 
 @media (max-width: 759px) {

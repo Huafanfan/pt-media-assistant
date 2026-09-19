@@ -35,7 +35,10 @@ export class DiscoveryItemNotFoundError extends Error {
   public readonly collection: DiscoveryCollectionId | string;
   public readonly itemId: string;
 
-  public constructor(collection: DiscoveryCollectionId | string, itemId: string) {
+  public constructor(
+    collection: DiscoveryCollectionId | string,
+    itemId: string,
+  ) {
     super(`Discovery item not found: ${collection}/${itemId}`);
     this.name = "DiscoveryItemNotFoundError";
     this.collection = collection;
@@ -50,13 +53,32 @@ export type DiscoveryDoubanClient = {
     page?: number,
     limit?: number,
   ) => Promise<DiscoveryCollectionResponse>;
-  getDetails?: (itemId: string, mediaType: "movie" | "tv") => Promise<DoubanSubjectDetails>;
-  getMedia?: (itemId: string, mediaType: "movie" | "tv") => Promise<DiscoveryMedia>;
-  getMediaPoster?: (itemId: string, mediaType: "movie" | "tv") => Promise<DiscoveryPosterAsset>;
-  searchMedia?: (query: string, limit?: number) => Promise<DiscoveryMediaSearchResponse>;
-  getActorProfile?: (name: string, page?: number, limit?: number) => Promise<DiscoveryActorProfile>;
+  getDetails?: (
+    itemId: string,
+    mediaType: "movie" | "tv",
+  ) => Promise<DoubanSubjectDetails>;
+  getMedia?: (
+    itemId: string,
+    mediaType: "movie" | "tv",
+  ) => Promise<DiscoveryMedia>;
+  getMediaPoster?: (
+    itemId: string,
+    mediaType: "movie" | "tv",
+  ) => Promise<DiscoveryPosterAsset>;
+  searchMedia?: (
+    query: string,
+    limit?: number,
+  ) => Promise<DiscoveryMediaSearchResponse>;
+  getActorProfile?: (
+    name: string,
+    page?: number,
+    limit?: number,
+  ) => Promise<DiscoveryActorProfile>;
   getActorAvatar?: (actorId: string) => Promise<DiscoveryPosterAsset>;
-  getActorWorkPoster?: (actorId: string, workId: string) => Promise<DiscoveryPosterAsset>;
+  getActorWorkPoster?: (
+    actorId: string,
+    workId: string,
+  ) => Promise<DiscoveryPosterAsset>;
   getPoster?: (
     collection: DiscoveryCollectionId,
     itemId: string,
@@ -68,7 +90,11 @@ export type DiscoveryDoubanClient = {
 export type DiscoverySearchResult = SearchResponse | ReleaseSummary[];
 
 export type DiscoveryProwlarrClient = {
-  search: (intent: ParsedIntent, limit?: number, options?: { signal?: AbortSignal }) => Promise<DiscoverySearchResult>;
+  search: (
+    intent: ParsedIntent,
+    limit?: number,
+    options?: { signal?: AbortSignal },
+  ) => Promise<DiscoverySearchResult>;
   retainReleases?: (ids: string[], expiresAt: number) => void;
   releaseReleases?: (ids: string[]) => void;
   hasRelease?: (id: string) => boolean;
@@ -113,7 +139,8 @@ export type DiscoveryDependencies = {
   prowlarr: DiscoveryProwlarrClient;
 };
 
-export type DiscoveryServiceDependencies = DiscoveryDependencies & DiscoveryServiceOptions;
+export type DiscoveryServiceDependencies = DiscoveryDependencies &
+  DiscoveryServiceOptions;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -129,7 +156,8 @@ function releaseId(value: ReleaseSummary): string {
 }
 
 function seeders(value: ReleaseSummary): number {
-  const number = typeof value.seeders === "number" ? value.seeders : Number(value.seeders);
+  const number =
+    typeof value.seeders === "number" ? value.seeders : Number(value.seeders);
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
@@ -146,28 +174,45 @@ function copyRelease(release: ReleaseSummary): ReleaseSummary {
     grabs: release.grabs,
     ageDays: release.ageDays,
     categories: Array.isArray(release.categories)
-      ? release.categories.filter((category): category is string => typeof category === "string").slice(0, 20)
+      ? release.categories
+          .filter(
+            (category): category is string => typeof category === "string",
+          )
+          .slice(0, 20)
       : [],
-    ...(release.resolution !== undefined ? { resolution: release.resolution } : {}),
+    ...(release.resolution !== undefined
+      ? { resolution: release.resolution }
+      : {}),
     ...(release.codec !== undefined ? { codec: release.codec } : {}),
     ...(release.season !== undefined ? { season: release.season } : {}),
     freeleech: release.freeleech === true,
-    ...(release.freeleechState === "yes" || release.freeleechState === "no" || release.freeleechState === "unknown"
+    ...(release.freeleechState === "yes" ||
+    release.freeleechState === "no" ||
+    release.freeleechState === "unknown"
       ? { freeleechState: release.freeleechState }
       : {}),
-    ...(evidence ? {
-      evidence: {
-        resolution: evidence.resolution === "upstream" || evidence.resolution === "title_inferred"
-          ? evidence.resolution
-          : "unknown",
-        codec: evidence.codec === "upstream" || evidence.codec === "title_inferred"
-          ? evidence.codec
-          : "unknown",
-        size: evidence.size === "upstream" ? "upstream" : "unknown",
-        seeders: evidence.seeders === "upstream" ? "upstream" : "unknown",
-        season: evidence.season === "title_inferred" ? "title_inferred" : "unknown",
-      },
-    } : {}),
+    ...(evidence
+      ? {
+          evidence: {
+            resolution:
+              evidence.resolution === "upstream" ||
+              evidence.resolution === "title_inferred"
+                ? evidence.resolution
+                : "unknown",
+            codec:
+              evidence.codec === "upstream" ||
+              evidence.codec === "title_inferred"
+                ? evidence.codec
+                : "unknown",
+            size: evidence.size === "upstream" ? "upstream" : "unknown",
+            seeders: evidence.seeders === "upstream" ? "upstream" : "unknown",
+            season:
+              evidence.season === "title_inferred"
+                ? "title_inferred"
+                : "unknown",
+          },
+        }
+      : {}),
   };
 }
 
@@ -175,14 +220,20 @@ type AbortReason = Error;
 
 function abortReason(signal?: AbortSignal): AbortReason {
   const reason: unknown = signal?.reason;
-  return reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError");
+  return reason instanceof Error
+    ? reason
+    : new DOMException("The operation was aborted", "AbortError");
 }
 
-function cloneReleaseResponse(response: DiscoveryReleaseResponse): DiscoveryReleaseResponse {
+function cloneReleaseResponse(
+  response: DiscoveryReleaseResponse,
+): DiscoveryReleaseResponse {
   return {
     ...(response.snapshotId ? { snapshotId: response.snapshotId } : {}),
     ...(response.expiresAt ? { expiresAt: response.expiresAt } : {}),
-    ...(response.actionableUntil ? { actionableUntil: response.actionableUntil } : {}),
+    ...(response.actionableUntil
+      ? { actionableUntil: response.actionableUntil }
+      : {}),
     itemId: response.itemId,
     query: response.query,
     status: response.status,
@@ -192,13 +243,19 @@ function cloneReleaseResponse(response: DiscoveryReleaseResponse): DiscoveryRele
   };
 }
 
-function queryFor(item: DiscoveryMedia, field: "title" | "originalTitle"): string {
+function queryFor(
+  item: DiscoveryMedia,
+  field: "title" | "originalTitle",
+): string {
   const title = field === "originalTitle" ? item.originalTitle : item.title;
   const base = title?.trim() || item.title.trim();
   return item.year ? `${base} ${item.year}` : base;
 }
 
-function mergeReleases(primary: ReleaseSummary[], secondary: ReleaseSummary[] = []): ReleaseSummary[] {
+function mergeReleases(
+  primary: ReleaseSummary[],
+  secondary: ReleaseSummary[] = [],
+): ReleaseSummary[] {
   const seen = new Set<string>();
   const merged: ReleaseSummary[] = [];
   for (const release of [...primary, ...secondary]) {
@@ -211,7 +268,9 @@ function mergeReleases(primary: ReleaseSummary[], secondary: ReleaseSummary[] = 
   return merged;
 }
 
-function statusFor(releases: ReleaseSummary[]): DiscoveryReleaseResponse["status"] {
+function statusFor(
+  releases: ReleaseSummary[],
+): DiscoveryReleaseResponse["status"] {
   if (releases.some((release) => seeders(release) > 0)) return "available";
   if (releases.length > 0) return "possible";
   return "unavailable";
@@ -229,12 +288,21 @@ function dependenciesFrom(
   first: DiscoveryDependencies | DiscoveryDoubanClient,
   second?: DiscoveryProwlarrClient,
 ): DiscoveryDependencies {
-  if (second) return { douban: first as DiscoveryDoubanClient, prowlarr: second };
+  if (second)
+    return { douban: first as DiscoveryDoubanClient, prowlarr: second };
   if (isObject(first) && "douban" in first && "prowlarr" in first) {
     const douban = first.douban;
     const prowlarr = first.prowlarr;
-    if (isObject(douban) && typeof douban.list === "function" && isObject(prowlarr) && typeof prowlarr.search === "function") {
-      return { douban: douban as DiscoveryDoubanClient, prowlarr: prowlarr as DiscoveryProwlarrClient };
+    if (
+      isObject(douban) &&
+      typeof douban.list === "function" &&
+      isObject(prowlarr) &&
+      typeof prowlarr.search === "function"
+    ) {
+      return {
+        douban: douban as DiscoveryDoubanClient,
+        prowlarr: prowlarr as DiscoveryProwlarrClient,
+      };
     }
   }
   throw new TypeError("DiscoveryService requires Douban and Prowlarr clients");
@@ -266,7 +334,10 @@ export class DiscoveryService {
     options?: DiscoveryServiceOptions,
   );
   public constructor(
-    first: DiscoveryDependencies | DiscoveryServiceDependencies | DiscoveryDoubanClient,
+    first:
+      | DiscoveryDependencies
+      | DiscoveryServiceDependencies
+      | DiscoveryDoubanClient,
     second?: DiscoveryProwlarrClient | DiscoveryServiceOptions,
     third: DiscoveryServiceOptions = {},
   ) {
@@ -274,23 +345,43 @@ export class DiscoveryService {
     const dependencies = isOptions
       ? dependenciesFrom(first)
       : dependenciesFrom(first, second as DiscoveryProwlarrClient);
-    const firstRecord = isObject(first) ? (first as Record<string, unknown>) : undefined;
+    const firstRecord = isObject(first)
+      ? (first as Record<string, unknown>)
+      : undefined;
     const embeddedOptions = firstRecord
       ? {
-        ...(typeof firstRecord.now === "function" ? { now: firstRecord.now as () => number } : {}),
-        ...(typeof firstRecord.sleep === "function" ? { sleep: firstRecord.sleep as (milliseconds: number) => Promise<void> } : {}),
-        ...(typeof firstRecord.minIntervalMs === "number" ? { minIntervalMs: firstRecord.minIntervalMs } : {}),
-        ...(typeof firstRecord.collectionLimit === "number" ? { collectionLimit: firstRecord.collectionLimit } : {}),
-      }
+          ...(typeof firstRecord.now === "function"
+            ? { now: firstRecord.now as () => number }
+            : {}),
+          ...(typeof firstRecord.sleep === "function"
+            ? {
+                sleep: firstRecord.sleep as (
+                  milliseconds: number,
+                ) => Promise<void>,
+              }
+            : {}),
+          ...(typeof firstRecord.minIntervalMs === "number"
+            ? { minIntervalMs: firstRecord.minIntervalMs }
+            : {}),
+          ...(typeof firstRecord.collectionLimit === "number"
+            ? { collectionLimit: firstRecord.collectionLimit }
+            : {}),
+        }
       : {};
     const options = isOptions
-      ? { ...embeddedOptions, ...((second as DiscoveryServiceOptions | undefined) ?? {}) }
+      ? {
+          ...embeddedOptions,
+          ...((second as DiscoveryServiceOptions | undefined) ?? {}),
+        }
       : third;
     this.douban = dependencies.douban;
     this.prowlarr = dependencies.prowlarr;
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? defaultSleep;
-    this.minIntervalMs = Math.max(0, options.minIntervalMs ?? PT_QUERY_MIN_INTERVAL_MS);
+    this.minIntervalMs = Math.max(
+      0,
+      options.minIntervalMs ?? PT_QUERY_MIN_INTERVAL_MS,
+    );
   }
 
   public async list(
@@ -298,8 +389,13 @@ export class DiscoveryService {
     page = 1,
     limit = DEFAULT_DISCOVERY_LIMIT,
   ): Promise<DiscoveryCollectionResponse> {
-    if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
-    return this.douban.list(collection, normalizeDiscoveryPage(page), normalizeDiscoveryLimit(limit));
+    if (!isDiscoveryCollectionId(collection))
+      throw new UnknownDiscoveryCollectionError(String(collection));
+    return this.douban.list(
+      collection,
+      normalizeDiscoveryPage(page),
+      normalizeDiscoveryLimit(limit),
+    );
   }
 
   public getCollection(
@@ -316,15 +412,27 @@ export class DiscoveryService {
     limit = DEFAULT_DISCOVERY_LIMIT,
     options: DiscoveryReleaseQueryOptions = {},
   ): Promise<DiscoveryReleaseResponse> {
-    if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
+    if (!isDiscoveryCollectionId(collection))
+      throw new UnknownDiscoveryCollectionError(String(collection));
     // `limit` remains part of the public route for compatibility with the
     // collection page size. Release candidates are deliberately fetched as a
     // bounded snapshot and paginated locally by the inspector.
     const boundedLimit = normalizeDiscoveryLimit(limit);
     const page = normalizeDiscoveryPage(options.page);
     const normalizedItemId = String(itemId);
-    const item = await this.findItem(collection, normalizedItemId, page, boundedLimit);
-    return this.getMediaReleases(item.mediaType, item.id, boundedLimit, options, item);
+    const item = await this.findItem(
+      collection,
+      normalizedItemId,
+      page,
+      boundedLimit,
+    );
+    return this.getMediaReleases(
+      item.mediaType,
+      item.id,
+      boundedLimit,
+      options,
+      item,
+    );
   }
 
   public async getMediaReleases(
@@ -344,7 +452,12 @@ export class DiscoveryService {
     if (!options.forceRefresh && cached && cached.expiresAt > this.now()) {
       this.releaseCache.delete(key);
       this.releaseCache.set(key, cached);
-      if (this.prowlarr.hasRelease && cached.response.releases.some((release) => !this.prowlarr.hasRelease!(release.id))) {
+      if (
+        this.prowlarr.hasRelease &&
+        cached.response.releases.some(
+          (release) => !this.prowlarr.hasRelease!(release.id),
+        )
+      ) {
         cached.response.actionableUntil = new Date(this.now()).toISOString();
       }
       return cloneReleaseResponse(cached.response);
@@ -364,10 +477,17 @@ export class DiscoveryService {
       finished: false,
     };
     this.pendingReleases.set(key, work);
-    const operation = this.queryReleases(mediaType, normalizedItemId, boundedLimit, key, knownMedia, {
-      ...(options.signal ? { signal: work.controller.signal } : {}),
-      beforeSearch: () => this.runBeforeSearch(work),
-    });
+    const operation = this.queryReleases(
+      mediaType,
+      normalizedItemId,
+      boundedLimit,
+      key,
+      knownMedia,
+      {
+        ...(options.signal ? { signal: work.controller.signal } : {}),
+        beforeSearch: () => this.runBeforeSearch(work),
+      },
+    );
     work.promise = operation;
     void operation.then(
       () => this.finishPending(key, work),
@@ -396,13 +516,17 @@ export class DiscoveryService {
 
   private finishPending(key: string, work: PendingReleaseWork): void {
     work.finished = true;
-    if (this.pendingReleases.get(key) === work) this.pendingReleases.delete(key);
+    if (this.pendingReleases.get(key) === work)
+      this.pendingReleases.delete(key);
   }
 
   private runBeforeSearch(work: PendingReleaseWork): void {
-    const waiter = [...work.waiters].find((candidate) => (
-      candidate.active && !candidate.signal?.aborted && candidate.beforeSearch
-    ));
+    const waiter = [...work.waiters].find(
+      (candidate) =>
+        candidate.active &&
+        !candidate.signal?.aborted &&
+        candidate.beforeSearch,
+    );
     waiter?.beforeSearch?.();
   }
 
@@ -412,7 +536,10 @@ export class DiscoveryService {
   ): Promise<DiscoveryReleaseResponse> {
     options.signal?.throwIfAborted();
     const operation = work.promise;
-    if (!operation) return Promise.reject(new Error("Discovery release operation unavailable"));
+    if (!operation)
+      return Promise.reject(
+        new Error("Discovery release operation unavailable"),
+      );
 
     const waiter: PendingReleaseWaiter = {
       ...(options.signal ? { signal: options.signal } : {}),
@@ -424,7 +551,8 @@ export class DiscoveryService {
     return new Promise<DiscoveryReleaseResponse>((resolve, reject) => {
       let settled = false;
       const cleanup = (): void => {
-        if (options.signal) options.signal.removeEventListener("abort", onAbort);
+        if (options.signal)
+          options.signal.removeEventListener("abort", onAbort);
         waiter.active = false;
         work.waiters.delete(waiter);
         if (!work.finished && work.waiters.size === 0) work.controller.abort();
@@ -466,13 +594,16 @@ export class DiscoveryService {
     page: number,
     limit: number,
   ): Promise<DiscoveryItem> {
-    if (!isDiscoveryCollectionId(collection)) throw new UnknownDiscoveryCollectionError(String(collection));
+    if (!isDiscoveryCollectionId(collection))
+      throw new UnknownDiscoveryCollectionError(String(collection));
     const response = await this.douban.list(
       collection,
       normalizeDiscoveryPage(page),
       normalizeDiscoveryLimit(limit),
     );
-    const item = response.items.find((candidate) => String(candidate.id) === String(itemId));
+    const item = response.items.find(
+      (candidate) => String(candidate.id) === String(itemId),
+    );
     if (!item) throw new DiscoveryItemNotFoundError(collection, String(itemId));
     return item;
   }
@@ -484,7 +615,8 @@ export class DiscoveryService {
     limit = DEFAULT_DISCOVERY_LIMIT,
   ): Promise<DiscoveryItemDetails> {
     const item = await this.findItem(collection, itemId, page, limit);
-    if (!this.douban.getDetails) throw new Error("Discovery details unavailable");
+    if (!this.douban.getDetails)
+      throw new Error("Discovery details unavailable");
     const details = await this.douban.getDetails(item.id, item.mediaType);
     return {
       itemId: item.id,
@@ -497,7 +629,8 @@ export class DiscoveryService {
     mediaType: "movie" | "tv",
     itemId: string,
   ): Promise<DiscoveryItemDetails> {
-    if (!this.douban.getDetails) throw new Error("Discovery details unavailable");
+    if (!this.douban.getDetails)
+      throw new Error("Discovery details unavailable");
     const details = await this.douban.getDetails(itemId, mediaType);
     return {
       itemId: details.itemId,
@@ -506,16 +639,25 @@ export class DiscoveryService {
     };
   }
 
-  public async getMedia(mediaType: "movie" | "tv", itemId: string): Promise<DiscoveryMedia> {
+  public async getMedia(
+    mediaType: "movie" | "tv",
+    itemId: string,
+  ): Promise<DiscoveryMedia> {
     if (!this.douban.getMedia) throw new Error("Discovery media unavailable");
     const media = await this.douban.getMedia(itemId, mediaType);
     return {
-      id: media.id, title: media.title, mediaType: media.mediaType,
-      genres: [...media.genres], summary: media.summary, sourceUrl: media.sourceUrl,
+      id: media.id,
+      title: media.title,
+      mediaType: media.mediaType,
+      genres: [...media.genres],
+      summary: media.summary,
+      sourceUrl: media.sourceUrl,
       ...(media.originalTitle ? { originalTitle: media.originalTitle } : {}),
       ...(media.year ? { year: media.year } : {}),
       ...(media.rating !== undefined ? { rating: media.rating } : {}),
-      ...(media.ratingCount !== undefined ? { ratingCount: media.ratingCount } : {}),
+      ...(media.ratingCount !== undefined
+        ? { ratingCount: media.ratingCount }
+        : {}),
       ...(media.posterUrl ? { posterUrl: media.posterUrl } : {}),
     };
   }
@@ -524,7 +666,8 @@ export class DiscoveryService {
     mediaType: "movie" | "tv",
     itemId: string,
   ): Promise<DiscoveryPosterAsset> {
-    if (!this.douban.getMediaPoster) throw new Error("Discovery media poster unavailable");
+    if (!this.douban.getMediaPoster)
+      throw new Error("Discovery media poster unavailable");
     return this.douban.getMediaPoster(itemId, mediaType);
   }
 
@@ -532,7 +675,8 @@ export class DiscoveryService {
     query: string,
     limit = DEFAULT_DISCOVERY_LIMIT,
   ): Promise<DiscoveryMediaSearchResponse> {
-    if (!this.douban.searchMedia) throw new Error("Discovery media search unavailable");
+    if (!this.douban.searchMedia)
+      throw new Error("Discovery media search unavailable");
     return this.douban.searchMedia(query, normalizeDiscoveryLimit(limit));
   }
 
@@ -541,7 +685,8 @@ export class DiscoveryService {
     page = 1,
     limit = DEFAULT_DISCOVERY_LIMIT,
   ): Promise<DiscoveryActorProfile> {
-    if (!this.douban.getActorProfile) throw new Error("Discovery actor profile unavailable");
+    if (!this.douban.getActorProfile)
+      throw new Error("Discovery actor profile unavailable");
     const profile = await this.douban.getActorProfile(
       name,
       normalizeDiscoveryPage(page),
@@ -562,12 +707,17 @@ export class DiscoveryService {
   }
 
   public async getActorAvatar(actorId: string): Promise<DiscoveryPosterAsset> {
-    if (!this.douban.getActorAvatar) throw new Error("Discovery actor avatar unavailable");
+    if (!this.douban.getActorAvatar)
+      throw new Error("Discovery actor avatar unavailable");
     return this.douban.getActorAvatar(actorId);
   }
 
-  public async getActorWorkPoster(actorId: string, workId: string): Promise<DiscoveryPosterAsset> {
-    if (!this.douban.getActorWorkPoster) throw new Error("Discovery actor work poster unavailable");
+  public async getActorWorkPoster(
+    actorId: string,
+    workId: string,
+  ): Promise<DiscoveryPosterAsset> {
+    if (!this.douban.getActorWorkPoster)
+      throw new Error("Discovery actor work poster unavailable");
     return this.douban.getActorWorkPoster(actorId, workId);
   }
 
@@ -579,7 +729,12 @@ export class DiscoveryService {
   ): Promise<DiscoveryPosterAsset> {
     const item = await this.findItem(collection, itemId, page, limit);
     if (!this.douban.getPoster) throw new Error("Discovery poster unavailable");
-    return this.douban.getPoster(collection as DiscoveryCollectionId, item.id, page, limit);
+    return this.douban.getPoster(
+      collection as DiscoveryCollectionId,
+      item.id,
+      page,
+      limit,
+    );
   }
 
   private async queryReleases(
@@ -595,11 +750,18 @@ export class DiscoveryService {
     // The media summary is always sourced from an allowlisted Douban response
     // or from a server-known collection item; title/year data never comes
     // from the browser.
-    const item = knownMedia ?? await this.douban.getMedia?.(itemId, mediaType);
+    const item =
+      knownMedia ?? (await this.douban.getMedia?.(itemId, mediaType));
     if (!item) throw new Error("Discovery media unavailable");
 
-    const primaryQuery = item.originalTitle ? queryFor(item, "originalTitle") : queryFor(item, "title");
-    const primary = await this.enqueuePtSearch(primaryQuery, DISCOVERY_RELEASE_FETCH_LIMIT, options);
+    const primaryQuery = item.originalTitle
+      ? queryFor(item, "originalTitle")
+      : queryFor(item, "title");
+    const primary = await this.enqueuePtSearch(
+      primaryQuery,
+      DISCOVERY_RELEASE_FETCH_LIMIT,
+      options,
+    );
     let releases = mergeReleases(asReleases(primary));
     let selectedQuery = primaryQuery;
 
@@ -608,7 +770,11 @@ export class DiscoveryService {
     // a request can make two PT upstream calls.
     if (item.originalTitle && releases.length === 0) {
       const fallbackQuery = queryFor(item, "title");
-      const fallback = await this.enqueuePtSearch(fallbackQuery, DISCOVERY_RELEASE_FETCH_LIMIT, options);
+      const fallback = await this.enqueuePtSearch(
+        fallbackQuery,
+        DISCOVERY_RELEASE_FETCH_LIMIT,
+        options,
+      );
       releases = mergeReleases(releases, asReleases(fallback));
       selectedQuery = fallbackQuery;
     }
@@ -641,7 +807,11 @@ export class DiscoveryService {
   }
 
   /** Serialize all Prowlarr calls and enforce the inter-call interval. */
-  private enqueuePtSearch(query: string, limit: number, options: DiscoveryReleaseQueryOptions = {}): Promise<DiscoverySearchResult> {
+  private enqueuePtSearch(
+    query: string,
+    limit: number,
+    options: DiscoveryReleaseQueryOptions = {},
+  ): Promise<DiscoverySearchResult> {
     let result: Promise<DiscoverySearchResult>;
     const previous = this.ptQueue;
     result = previous.then(async () => {
@@ -655,10 +825,15 @@ export class DiscoveryService {
       options.beforeSearch?.();
       this.lastPtCallAt = this.now();
       return options.signal
-        ? this.prowlarr.search({ searchTerm: query }, limit, { signal: options.signal })
+        ? this.prowlarr.search({ searchTerm: query }, limit, {
+            signal: options.signal,
+          })
         : this.prowlarr.search({ searchTerm: query }, limit);
     });
-    this.ptQueue = result.then(() => undefined, () => undefined);
+    this.ptQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
     return result;
   }
 }

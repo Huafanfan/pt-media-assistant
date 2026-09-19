@@ -1,7 +1,17 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { assistantPreferencesSchema, defaultAssistantPreferences, type AssistantPreferences } from "../shared/assistant.js";
+import {
+  assistantPreferencesSchema,
+  defaultAssistantPreferences,
+  type AssistantPreferences,
+} from "../shared/assistant.js";
 import type { Conversation } from "./ai/conversation-store.js";
 
 /** Version 2 adds manually-removed (tombstoned) IDs; version 1 files still load. */
@@ -10,21 +20,30 @@ export const MAX_SEEN_ENTRIES = 2_000;
 const MAX_PREFERENCE_SEEN_IDS = 100;
 const MAX_REMOVED_IDS = 500;
 
-export const seenEntrySchema = z.object({
-  mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
-  mediaType: z.enum(["movie", "tv"]),
-  title: z.string().trim().min(1).max(240),
-  markedAt: z.iso.datetime(),
-}).strict();
+export const seenEntrySchema = z
+  .object({
+    mediaId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+    mediaType: z.enum(["movie", "tv"]),
+    title: z.string().trim().min(1).max(240),
+    markedAt: z.iso.datetime(),
+  })
+  .strict();
 export type SeenEntry = z.infer<typeof seenEntrySchema>;
 
-const stateSchema = z.object({
-  version: z.union([z.literal(1), z.literal(2)]),
-  seen: z.array(seenEntrySchema).max(MAX_SEEN_ENTRIES),
-  preferences: assistantPreferencesSchema,
-  // Tombstones carry both `id` and `type:id` forms.
-  removed: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/u)).max(MAX_REMOVED_IDS).default([]),
-}).strict();
+const stateSchema = z
+  .object({
+    version: z.union([z.literal(1), z.literal(2)]),
+    seen: z.array(seenEntrySchema).max(MAX_SEEN_ENTRIES),
+    preferences: assistantPreferencesSchema,
+    // Tombstones carry both `id` and `type:id` forms.
+    removed: z
+      .array(
+        z.string().regex(/^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/u),
+      )
+      .max(MAX_REMOVED_IDS)
+      .default([]),
+  })
+  .strict();
 
 type HistoryState = {
   seen: SeenEntry[];
@@ -33,7 +52,11 @@ type HistoryState = {
   removed: string[];
 };
 
-export type SeenTitleRecord = { mediaId: string; mediaType: "movie" | "tv"; title: string };
+export type SeenTitleRecord = {
+  mediaId: string;
+  mediaType: "movie" | "tv";
+  title: string;
+};
 export type SeenTitleIndex = ReadonlyMap<string, SeenTitleRecord>;
 
 /**
@@ -41,11 +64,21 @@ export type SeenTitleIndex = ReadonlyMap<string, SeenTitleRecord>;
  * can only mark IDs it has already resolved, so a missing title simply means
  * the ID stays in preferences instead of gaining a display entry.
  */
-export function buildSeenTitleIndex(conversation: Conversation): SeenTitleIndex {
+export function buildSeenTitleIndex(
+  conversation: Conversation,
+): SeenTitleIndex {
   const index = new Map<string, SeenTitleRecord>();
-  const add = (mediaId: string, mediaType: "movie" | "tv", title: string): void => {
+  const add = (
+    mediaId: string,
+    mediaType: "movie" | "tv",
+    title: string,
+  ): void => {
     if (!mediaId) return;
-    const record: SeenTitleRecord = { mediaId, mediaType, title: title.trim().slice(0, 240) || mediaId };
+    const record: SeenTitleRecord = {
+      mediaId,
+      mediaType,
+      title: title.trim().slice(0, 240) || mediaId,
+    };
     index.set(mediaId, record);
     index.set(`${mediaType}:${mediaId}`, record);
   };
@@ -53,7 +86,10 @@ export function buildSeenTitleIndex(conversation: Conversation): SeenTitleIndex 
     add(candidate.media.id, candidate.media.mediaType, candidate.media.title);
   }
   for (const entry of conversation.history) {
-    for (const card of [...entry.response.recommendations, ...(entry.response.pendingRecommendations ?? [])]) {
+    for (const card of [
+      ...entry.response.recommendations,
+      ...(entry.response.pendingRecommendations ?? []),
+    ]) {
       add(card.mediaId, card.mediaType, card.title);
     }
   }
@@ -77,11 +113,21 @@ export class HistoryStore {
   public constructor(options: { path?: string; now?: () => number } = {}) {
     this.path = options.path;
     this.now = options.now ?? Date.now;
-    this.state = { seen: [], preferences: defaultAssistantPreferences(), removed: [] };
+    this.state = {
+      seen: [],
+      preferences: defaultAssistantPreferences(),
+      removed: [],
+    };
     if (!this.path || !existsSync(this.path)) return;
     try {
-      const parsed = stateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
-      this.state = { seen: parsed.seen, preferences: parsed.preferences, removed: parsed.removed };
+      const parsed = stateSchema.parse(
+        JSON.parse(readFileSync(this.path, "utf8")),
+      );
+      this.state = {
+        seen: parsed.seen,
+        preferences: parsed.preferences,
+        removed: parsed.removed,
+      };
     } catch {
       // Preserve the damaged file instead of silently replacing it with an
       // empty state. The status view surfaces the load error.
@@ -140,30 +186,52 @@ export class HistoryStore {
   public markSeen(entry: SeenEntry): boolean {
     const parsed = seenEntrySchema.parse(entry);
     const key = `${parsed.mediaType}:${parsed.mediaId}`;
-    const seen = [parsed, ...this.state.seen.filter((existing) => `${existing.mediaType}:${existing.mediaId}` !== key)]
-      .slice(0, MAX_SEEN_ENTRIES);
+    const seen = [
+      parsed,
+      ...this.state.seen.filter(
+        (existing) => `${existing.mediaType}:${existing.mediaId}` !== key,
+      ),
+    ].slice(0, MAX_SEEN_ENTRIES);
     return this.commit({
       seen,
       preferences: assistantPreferencesSchema.parse({
         ...this.state.preferences,
-        seenMediaIds: uniqueTail([...this.state.preferences.seenMediaIds, parsed.mediaId, key], MAX_PREFERENCE_SEEN_IDS),
+        seenMediaIds: uniqueTail(
+          [...this.state.preferences.seenMediaIds, parsed.mediaId, key],
+          MAX_PREFERENCE_SEEN_IDS,
+        ),
       }),
-      removed: this.state.removed.filter((id) => id !== key && id !== parsed.mediaId),
+      removed: this.state.removed.filter(
+        (id) => id !== key && id !== parsed.mediaId,
+      ),
     });
   }
 
   /** Returns false when the change could not be persisted (memory unchanged). */
   public unmarkSeen(mediaType: "movie" | "tv", mediaId: string): boolean {
     const key = `${mediaType}:${mediaId}`;
-    const seen = this.state.seen.filter((entry) => `${entry.mediaType}:${entry.mediaId}` !== key);
-    const seenIds = this.state.preferences.seenMediaIds.filter((id) => id !== key && id !== mediaId);
-    if (seen.length === this.state.seen.length && seenIds.length === this.state.preferences.seenMediaIds.length) {
+    const seen = this.state.seen.filter(
+      (entry) => `${entry.mediaType}:${entry.mediaId}` !== key,
+    );
+    const seenIds = this.state.preferences.seenMediaIds.filter(
+      (id) => id !== key && id !== mediaId,
+    );
+    if (
+      seen.length === this.state.seen.length &&
+      seenIds.length === this.state.preferences.seenMediaIds.length
+    ) {
       return true;
     }
     return this.commit({
       seen,
-      preferences: assistantPreferencesSchema.parse({ ...this.state.preferences, seenMediaIds: seenIds }),
-      removed: uniqueTail([...this.state.removed, key, mediaId], MAX_REMOVED_IDS),
+      preferences: assistantPreferencesSchema.parse({
+        ...this.state.preferences,
+        seenMediaIds: seenIds,
+      }),
+      removed: uniqueTail(
+        [...this.state.removed, key, mediaId],
+        MAX_REMOVED_IDS,
+      ),
     });
   }
 
@@ -174,12 +242,17 @@ export class HistoryStore {
    * without one stay in preferences only, so the list never shows a
    * placeholder title.
    */
-  public savePreferences(preferences: AssistantPreferences, titles?: SeenTitleIndex): boolean {
+  public savePreferences(
+    preferences: AssistantPreferences,
+    titles?: SeenTitleIndex,
+  ): boolean {
     const tombstones = new Set(this.state.removed);
     const parsed = assistantPreferencesSchema.parse(preferences);
     const seenIds = parsed.seenMediaIds.filter((id) => !tombstones.has(id));
     let seen = this.state.seen;
-    const known = new Set(seen.map((entry) => `${entry.mediaType}:${entry.mediaId}`));
+    const known = new Set(
+      seen.map((entry) => `${entry.mediaType}:${entry.mediaId}`),
+    );
     const markedAt = new Date(this.now()).toISOString();
     for (const id of seenIds) {
       if (known.has(id)) continue;
@@ -187,13 +260,24 @@ export class HistoryStore {
       if (!info) continue;
       const key = `${info.mediaType}:${info.mediaId}`;
       if (known.has(key) || tombstones.has(key)) continue;
-      seen = [{ mediaId: info.mediaId, mediaType: info.mediaType, title: info.title, markedAt }, ...seen];
+      seen = [
+        {
+          mediaId: info.mediaId,
+          mediaType: info.mediaType,
+          title: info.title,
+          markedAt,
+        },
+        ...seen,
+      ];
       known.add(key);
     }
     if (seen.length > MAX_SEEN_ENTRIES) seen = seen.slice(0, MAX_SEEN_ENTRIES);
     return this.commit({
       seen,
-      preferences: assistantPreferencesSchema.parse({ ...parsed, seenMediaIds: uniqueTail(seenIds, MAX_PREFERENCE_SEEN_IDS) }),
+      preferences: assistantPreferencesSchema.parse({
+        ...parsed,
+        seenMediaIds: uniqueTail(seenIds, MAX_PREFERENCE_SEEN_IDS),
+      }),
       removed: this.state.removed,
     });
   }
@@ -204,11 +288,16 @@ export class HistoryStore {
   }
 
   private mergeSeenIntoPreferences(): void {
-    const ids = this.state.seen.slice(0, MAX_PREFERENCE_SEEN_IDS).map((entry) => `${entry.mediaType}:${entry.mediaId}`);
+    const ids = this.state.seen
+      .slice(0, MAX_PREFERENCE_SEEN_IDS)
+      .map((entry) => `${entry.mediaType}:${entry.mediaId}`);
     if (ids.length === 0) return;
     this.state.preferences = assistantPreferencesSchema.parse({
       ...this.state.preferences,
-      seenMediaIds: uniqueTail([...this.state.preferences.seenMediaIds, ...this.visibleSeenIds(ids)], MAX_PREFERENCE_SEEN_IDS),
+      seenMediaIds: uniqueTail(
+        [...this.state.preferences.seenMediaIds, ...this.visibleSeenIds(ids)],
+        MAX_PREFERENCE_SEEN_IDS,
+      ),
     });
   }
 
