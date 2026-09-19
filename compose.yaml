@@ -21,7 +21,7 @@ services:
       PT_MEDIA_ORIGIN: "${PT_MEDIA_ORIGIN:-http://192.168.1.2:4178}"
       PROWLARR_URL: http://127.0.0.1:9696
       PROWLARR_API_KEY_FILE: /run/secrets/prowlarr_api_key
-      QBITTORRENT_URL: "${QBITTORRENT_URL:-http://localhost:8080}"
+      QBITTORRENT_URL: "${QBITTORRENT_URL:-http://localhost:38081}"
       PT_MEDIA_NAS_PATH: "${PT_MEDIA_NAS_PATH:-/mnt/nas/pt}"
       PT_MEDIA_NAS_CHECK_MODE: sentinel
       PT_MEDIA_NAS_SENTINEL: "${PT_MEDIA_NAS_SENTINEL:-.pt-media-assistant-mounted}"

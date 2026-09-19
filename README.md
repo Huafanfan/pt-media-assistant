@@ -69,7 +69,7 @@
 
 ## 推荐：iStoreOS 服务器 Docker 部署
 
-生产运行时推荐使用 iStoreOS 上的 x86_64 Docker 主机（当前地址为 `192.168.1.2`）。服务器版 `compose.yaml` 只启动应用和 Prowlarr；两者都使用 host networking，因此应用可以访问服务器上现有的原生 qBittorrent `http://localhost:8080`。qBittorrent 不是 Compose 服务，也不会被本项目创建、升级或重启。
+生产运行时推荐使用 iStoreOS 上的 x86_64 Docker 主机（当前地址为 `192.168.1.2`）。服务器版 `compose.yaml` 只启动应用和 Prowlarr；两者都使用 host networking，因此应用可以访问服务器上现有的原生 qBittorrent `http://localhost:38081`。qBittorrent 不是 Compose 服务，也不会被本项目创建、升级或重启。
 
 服务器布局保持部署元数据、源码、密钥和 Prowlarr 数据分离：
 
