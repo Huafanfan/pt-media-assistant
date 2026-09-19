@@ -1,5 +1,7 @@
 # DeepSeek 部署验收（2026-09-12）
 
+> 历史归档：保留当时的方案、状态与验收证据；文中的“当前”“待实施”和恢复指令只适用于记录当时，不代表现行配置或新的执行要求。现行入口见 [文档导航](../../README.md).
+
 - 模型：DeepSeek-V4.1-Flash，API ID `deepseek-flash`，Chat Completions 非思考模式。官方目录验证 HTTP 200。
 - 入口：http://192.168.1.2:4178；Compose 项目与容器均为 `pt-media-assistant`。
 - 镜像：`sha256:2a1f8e06e0f3c4ca4e7fb346052fa926bf5f55c6ea366c3213262967fc5bbb28`，`linux/amd64`。

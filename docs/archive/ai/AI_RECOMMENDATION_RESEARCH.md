@@ -1,5 +1,7 @@
 # AI 观影推荐与 PT 资源助手调研
 
+> 历史归档：保留当时的方案、状态与验收证据；文中的“当前”“待实施”和恢复指令只适用于记录当时，不代表现行配置或新的执行要求。现行入口见 [文档导航](../../README.md).
+
 日期：2026-09-07。状态：调研完成，方案待 review；本文不表示功能已经实现。
 
 ## 结论
@@ -8,7 +10,7 @@
 
 Agent 在这里是应用内部的一段循环：理解需求 → 请求调用允许的业务函数 → 服务端执行并返回结果 → 模型解释推荐。LLM 不直接持有 PT 凭据或调用下载 API。工具调用 SDK 是可选的工程依赖，不是额外部署的服务。
 
-推荐依赖 `ai`、`@ai-sdk/openai-compatible`，沿用 Zod；通过自定义 provider 直连 TRANS_STATION，不依赖 AI Gateway。开发开始时锁定相容版本并验证 Node 22 / Zod 4，不能照抄跨版本示例。详细开发合同见 [feature 文档](features/AI_RECOMMENDATION.md)。
+推荐依赖 `ai`、`@ai-sdk/openai-compatible`，沿用 Zod；通过自定义 provider 直连 TRANS_STATION，不依赖 AI Gateway。开发开始时锁定相容版本并验证 Node 22 / Zod 4，不能照抄跨版本示例。详细开发合同见 [feature 文档](AI_RECOMMENDATION.md)。
 
 ## 当前代码实际能力
 
