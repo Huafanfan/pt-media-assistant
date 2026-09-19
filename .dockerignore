@@ -3,6 +3,7 @@
 .env
 .env.*
 .data
+secrets
 node_modules
 dist
 coverage
