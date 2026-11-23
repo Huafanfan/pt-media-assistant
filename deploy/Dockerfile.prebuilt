@@ -1,0 +1,5 @@
+# Reuse the verified linux/amd64 runtime when package.json + lockfile are unchanged.
+# Compile dist with npm run build first. The original Dockerfile remains the full-build path.
+ARG PT_MEDIA_RUNTIME_BASE=pt-media-assistant:rollback-before-simple-20261109
+FROM ${PT_MEDIA_RUNTIME_BASE}
+COPY --chown=node:node dist /app/dist

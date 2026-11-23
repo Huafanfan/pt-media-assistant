@@ -1,4 +1,5 @@
 import type { GrabResponse, GrabPreviewResponse, ReleaseSummary, ServiceHealth, TorrentSummary } from "../shared/contracts";
+import type { RankedRelease } from "../shared/release-selection";
 import type {
   AssistantAvailability,
   AssistantPreferences,
@@ -52,6 +53,8 @@ export type SelectionState = {
   release: ReleaseSummary;
   index: number;
   preview: GrabPreviewResponse | null;
+  /** Present when the choice came from the structured selection surface. */
+  ranked?: RankedRelease;
 };
 
 export type GrabState = {

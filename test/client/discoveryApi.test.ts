@@ -239,3 +239,49 @@ describe("discovery API client", () => {
     );
   });
 });
+
+describe("discovery release snapshot reference", () => {
+  it("preserves the snapshot reference used by the selection surface", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            snapshotId: "snap-aaaaaaaa",
+            expiresAt: "2026-09-19T12:00:00.000Z",
+            actionableUntil: "2026-09-19T12:00:00.000Z",
+            itemId: "36808876",
+            query: "The Odyssey 2026",
+            status: "available",
+            checkedAt: "2026-09-19T11:00:00.000Z",
+            total: 1,
+            releases: [
+              {
+                id: "rel-aaaaaaaa",
+                title: "The.Odyssey.2026.1080p.WEB-DL",
+                indexer: "TJUPT",
+                protocol: "torrent",
+                size: 1,
+                seeders: 1,
+                leechers: 0,
+                grabs: 0,
+                ageDays: 1,
+                categories: [],
+                freeleech: false,
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const client = createApiClient(fetchImpl as typeof fetch);
+    const response = await client.getDiscoveryMediaReleases(
+      "movie",
+      "36808876",
+      "csrf",
+      10,
+    );
+    expect(response.snapshotId).toBe("snap-aaaaaaaa");
+    expect(response.expiresAt).toBe("2026-09-19T12:00:00.000Z");
+    expect(response.actionableUntil).toBe("2026-09-19T12:00:00.000Z");
+  });
+});

@@ -1,0 +1,7 @@
+# Current two-page UI. Use with compose.yaml, without the old AI overlays.
+services:
+  app:
+    image: pt-media-assistant:20261109-simple
+    environment:
+      PT_MEDIA_AI_ENABLED: "0"
+      PT_MEDIA_AI_WEB_ENABLED: "0"

@@ -564,3 +564,50 @@ describe("Fastify authentication and grab guard", () => {
     await app.close();
   });
 });
+
+describe("explicit download batches", () => {
+  it("accepts a full search-sized batch while keeping the next grab rate-limited", async () => {
+    const grab = vi.fn(async () => undefined);
+    const app = await createApp({
+      config: { ...config, allowGrab: true },
+      pairing: new PairingService({ pairingCode: config.pairingCode }),
+      prowlarr: {
+        search: vi.fn(),
+        getRelease: vi.fn((id: string) => makeRelease(id)),
+        grab,
+        check: vi.fn(async () => true),
+      },
+      qbittorrent: {
+        listTorrents: vi.fn(async () => []),
+        duplicateForRelease: vi.fn(async () => false),
+        check: vi.fn(async () => true),
+        torrentAction: vi.fn(async () => undefined),
+      },
+      nas: readyNas,
+      staticRoot: "/definitely-not-a-static-root",
+    });
+    try {
+      const pair = await app.inject({
+        method: "POST", url: "/api/auth/pair",
+        headers: { host: "localhost:4178", origin: "http://localhost:4178" },
+        payload: { code: "123456" },
+      });
+      const headers = {
+        host: "localhost:4178", origin: "http://localhost:4178",
+        cookie: String(pair.headers["set-cookie"]).split(";", 1)[0],
+        "x-csrf-token": pair.json().csrfToken as string,
+      };
+      for (let index = 0; index < 50; index++) {
+        const releaseId = `release${String(index).padStart(13, "0")}`;
+        const preview = await app.inject({ method: "POST", url: "/api/grab/preview", headers, payload: { releaseId } });
+        expect(preview.statusCode).toBe(200);
+        const result = await app.inject({ method: "POST", url: "/api/grab", headers, payload: { releaseId, confirm: true } });
+        expect(result.statusCode).toBe(200);
+      }
+      expect(grab).toHaveBeenCalledTimes(50);
+      const limited = await app.inject({ method: "POST", url: "/api/grab", headers, payload: { releaseId: "abcdefghijklmnopqrst", confirm: true } });
+      expect(limited.statusCode).toBe(429);
+      expect(grab).toHaveBeenCalledTimes(50);
+    } finally { await app.close(); }
+  });
+});

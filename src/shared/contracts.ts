@@ -77,6 +77,15 @@ export type ReleaseSummary = {
   season?: number;
   freeleech: boolean;
   freeleechState?: "yes" | "no" | "unknown";
+  /** Upstream video source tier when the indexer supplied one. */
+  source?: string;
+  /** Upstream dynamic range when the indexer supplied one. */
+  hdr?: string;
+  /** Upstream file count when the indexer supplied one. */
+  fileCount?: number;
+  /** Upstream subtitle/audio language hints when supplied; omitted means unknown. */
+  subtitleLanguages?: string[];
+  audioLanguages?: string[];
   evidence?: {
     resolution: "upstream" | "title_inferred" | "unknown";
     codec: "upstream" | "title_inferred" | "unknown";
@@ -92,6 +101,8 @@ export type SearchResponse = {
   total: number;
   elapsedMs: number;
   releases: ReleaseSummary[];
+  /** Bounded server-side snapshot reference for the selection surface. */
+  snapshotId?: string;
 };
 
 export type DiscoveryCollectionId =

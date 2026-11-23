@@ -26,6 +26,12 @@ function serviceHealthText(
   return `${indexer} · ${client} · ${nas}`;
 }
 
+export type AiStatus = {
+  state: "ok" | "warning" | "off" | "unknown";
+  label: string;
+  detail?: string;
+};
+
 export function AppHeader({
   health,
   paired,
@@ -33,6 +39,7 @@ export function AppHeader({
   onRefresh,
   onShowStatus,
   runtimeStatus,
+  aiStatus,
 }: {
   health: ServiceHealth | null;
   paired: boolean;
@@ -40,6 +47,7 @@ export function AppHeader({
   onRefresh?: () => void;
   onShowStatus?: () => void;
   runtimeStatus?: ReactNode;
+  aiStatus?: AiStatus | null;
 }) {
   const isHealthy = paired && health?.status === "ok";
   const statusText = serviceHealthText(health, paired);
@@ -75,6 +83,15 @@ export function AppHeader({
             ) : null}
           </p>
           <div className="header-status-runtime">{runtimeStatus}</div>
+          {aiStatus ? (
+            <p
+              className={`service-status ai-status is-${aiStatus.state}`}
+              title={aiStatus.detail}
+            >
+              <span className="status-dot" aria-hidden="true" />
+              <span>{aiStatus.label}</span>
+            </p>
+          ) : null}
         </div>
         {healthError ? <span className="sr-only">{healthError}</span> : null}
       </div>

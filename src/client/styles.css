@@ -152,6 +152,16 @@ textarea:focus-visible {
   background: var(--warning);
 }
 
+/* AI capability chip in the header status line. */
+.service-status.is-warning .status-dot {
+  background: var(--warning);
+}
+
+.service-status.is-off,
+.service-status.is-unknown {
+  color: var(--faint);
+}
+
 .service-status-refresh {
   display: inline-flex;
   align-items: center;

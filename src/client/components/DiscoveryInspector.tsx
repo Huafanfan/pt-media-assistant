@@ -18,7 +18,19 @@ import type {
 } from "../../shared/contracts";
 import { DiscoveryPoster } from "./DiscoveryPoster";
 import { formatBytes } from "./ReleaseList";
+import {
+  ReleaseSelectionPanel,
+  type ReleaseSelectionAssistant,
+} from "./ReleaseSelectionPanel";
+import type {
+  ReleaseSelectionRequest,
+  ReleaseSelectionResponse,
+  RankedRelease,
+  SelectionContentKind,
+  SelectionSnapshotRef,
+} from "../../shared/release-selection";
 import "../discovery.css";
+import "../release-selection.css";
 
 export type MediaInspectorProps = {
   item: DiscoveryMedia | null;
@@ -30,7 +42,7 @@ export type MediaInspectorProps = {
   error: string | null;
   selectedReleaseId: string | null;
   selectingId: string | null;
-  onSelectRelease: (release: ReleaseSummary) => void;
+  onSelectRelease: (release: ReleaseSummary, ranked?: RankedRelease) => void;
   onClose: () => void;
   onRetry: () => void;
   onRetryDetails: () => void;
@@ -38,6 +50,19 @@ export type MediaInspectorProps = {
   seen?: boolean;
   seenPending?: boolean;
   onToggleSeen?: () => void;
+  /** Structured selection surface; falls back to the raw candidate list when absent. */
+  selection?: {
+    snapshot: SelectionSnapshotRef | null;
+    csrfToken: string;
+    defaultKind: SelectionContentKind;
+    loadSelection: (
+      request: ReleaseSelectionRequest,
+      csrfToken: string,
+    ) => Promise<ReleaseSelectionResponse>;
+    assist?: ReleaseSelectionAssistant;
+    /** qBittorrent task names for local "not downloaded first" ordering. */
+    torrentNames?: string[];
+  } | null;
 };
 
 const RELEASE_PAGE_SIZE = 10;
@@ -120,7 +145,9 @@ export function MediaInspector({
   seen = false,
   seenPending = false,
   onToggleSeen,
+  selection,
 }: MediaInspectorProps) {
+  const [showRawList, setShowRawList] = useState(false);
   const itemHeading = item?.title ?? "候选片源";
   const hasResponse = Boolean(releaseResponse && !error);
   const releases = releaseResponse?.releases ?? [];
@@ -269,6 +296,7 @@ export function MediaInspector({
     setReleaseFilters(DEFAULT_RELEASE_FILTERS);
     setReleaseSort("default");
     setReleasePage(1);
+    setShowRawList(false);
   }, [item?.mediaType, item?.id]);
 
   useEffect(() => {
@@ -513,6 +541,21 @@ export function MediaInspector({
                     检查片源
                   </button>
                 </div>
+              ) : selection?.snapshot && !showRawList ? (
+                <ReleaseSelectionPanel
+                  snapshot={selection.snapshot}
+                  csrfToken={selection.csrfToken}
+                  defaultKind={selection.defaultKind}
+                  loadSelection={selection.loadSelection}
+                  selectedReleaseId={selectedReleaseId}
+                  selectingId={selectingId}
+                  onSelectRelease={(release, ranked) =>
+                    onSelectRelease(release, ranked)
+                  }
+                  onShowRawList={() => setShowRawList(true)}
+                  assist={selection.assist}
+                  torrentNames={selection.torrentNames}
+                />
               ) : releases.length === 0 ? (
                 <div
                   className="discovery-inspector-state discovery-inspector-empty-state"
@@ -535,6 +578,15 @@ export function MediaInspector({
                 </div>
               ) : (
                 <>
+                  {selection?.snapshot ? (
+                    <button
+                      className="discovery-inline-action"
+                      type="button"
+                      onClick={() => setShowRawList(false)}
+                    >
+                      返回结构化视图
+                    </button>
+                  ) : null}
                   <div
                     className="discovery-release-filters"
                     aria-label="片源筛选与排序"

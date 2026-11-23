@@ -1,838 +1,177 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { ApiClient } from "../../src/client/api";
-import { ApiError } from "../../src/client/api";
 import { App } from "../../src/client/App";
-import { formatCategories } from "../../src/client/components/ReleaseList";
-import {
-  defaultAssistantPreferences,
-  type AssistantTurnResponse,
-} from "../../src/shared/assistant";
+import type { ApiClient } from "../../src/client/api";
+import type { ReleaseSummary, SearchResponse, ServiceHealth } from "../../src/shared/contracts";
 
-const release = {
-  id: "release-1",
-  title: "Interstellar.2014.2160p.BluRay.x265.10bit.AAC5.1-TJUPT",
-  indexer: "TJUPT",
-  protocol: "torrent" as const,
-  size: 19.8 * 1024 ** 3,
-  seeders: 78,
-  leechers: 3,
-  grabs: 12,
-  ageDays: 4,
-  categories: ["科幻", "冒险"],
-  resolution: "4K",
-  codec: "HEVC",
-  freeleech: false,
-};
-
-const discoveryItem = {
-  id: "36808876",
-  title: "奥德赛",
-  posterUrl:
-    "/api/discovery/collections/movie-hot/items/36808876/poster?page=1&limit=10",
-  originalTitle: "The Odyssey",
-  year: "2026",
-  rating: 8.5,
-  ratingCount: 12345,
-  rank: 1,
-  mediaType: "movie" as const,
-  genres: ["动作", "冒险"],
-  summary: "英雄在漫长归途中面对神明与命运。",
-  sourceUrl: "https://movie.douban.com/subject/36808876/",
-};
-
-const searchMediaItem = {
-  id: "1293000",
-  title: "星际穿越",
-  posterUrl: "/api/discovery/media/movie/1293000/poster",
-  originalTitle: "Interstellar",
-  year: "2014",
-  rating: 8.6,
-  mediaType: "movie" as const,
-  genres: ["科幻"],
-  summary: "一支探险队穿越虫洞寻找新家园。",
-  sourceUrl: "https://movie.douban.com/subject/1293000/",
-};
-
-function makeClient({
-  paired = true,
-  grab = vi
-    .fn()
-    .mockResolvedValue({
-      accepted: true,
-      message: "已发送",
-      initialState: "started" as const,
-    }),
-} = {}) {
-  const client: ApiClient = {
-    getSession: vi
-      .fn()
-      .mockResolvedValue({
-        paired,
-        csrfToken: paired ? "csrf-test" : undefined,
-      }),
-    getHealth: vi.fn().mockResolvedValue({
-      status: "ok",
-      version: "test",
-      pairingRequired: !paired,
-      services: { prowlarr: true, qbittorrent: true, nasMounted: true },
-    }),
-    pair: vi.fn().mockResolvedValue({ paired: true, csrfToken: "csrf-test" }),
-    search: vi.fn().mockResolvedValue({
-      query: "星际穿越",
-      intent: { searchTerm: "星际穿越" },
-      total: 1,
-      elapsedMs: 42,
-      releases: [release],
-    }),
-    searchDiscoveryMedia: vi
-      .fn()
-      .mockResolvedValue({ query: "", total: 1, items: [searchMediaItem] }),
-    getDiscoveryCollection: vi.fn().mockResolvedValue({
-      collection: "movie-hot" as const,
-      updatedAt: "2026-08-29T00:00:00.000Z",
-      stale: false,
-      page: 1,
-      pageSize: 10,
-      total: 1,
-      hasNext: false,
-      items: [discoveryItem],
-    }),
-    getDiscoveryDetails: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      actors: [{ name: "演员甲" }, { name: "演员乙" }],
-      directors: ["导演甲"],
-    }),
-    getDiscoveryMediaDetails: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      actors: [{ name: "演员甲" }, { name: "演员乙" }],
-      directors: ["导演甲"],
-    }),
-    getDiscoveryActor: vi.fn().mockResolvedValue({
-      id: "actor-1",
-      name: "演员甲",
-      latinName: "Actor A",
-      intro: "演员 / 导演",
-      works: [],
-      page: 1,
-      pageSize: 10,
-      total: 0,
-      hasNext: false,
-    }),
-    getDiscoveryReleases: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      query: "The Odyssey 2026",
-      status: "available" as const,
-      checkedAt: "2026-08-29T00:00:01.000Z",
-      total: 1,
-      releases: [release],
-    }),
-    getDiscoveryMediaReleases: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      query: "The Odyssey 2026",
-      status: "available" as const,
-      checkedAt: "2026-08-29T00:00:01.000Z",
-      total: 1,
-      releases: [release],
-    }),
-    refreshDiscoveryReleases: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      query: "The Odyssey 2026",
-      status: "available" as const,
-      checkedAt: "2026-08-29T00:00:02.000Z",
-      total: 1,
-      releases: [release],
-    }),
-    refreshDiscoveryMediaReleases: vi.fn().mockResolvedValue({
-      itemId: discoveryItem.id,
-      query: "The Odyssey 2026",
-      status: "available" as const,
-      checkedAt: "2026-08-29T00:00:02.000Z",
-      total: 1,
-      releases: [release],
-    }),
-    grabPreview: vi.fn().mockResolvedValue({
-      release,
-      destination: "/Volumes/YourNAS/pt",
-      nasMounted: true,
-      duplicate: false,
-      initialState: "started",
-    }),
-    grab,
-    getTorrents: vi.fn().mockResolvedValue([]),
-    torrentAction: vi.fn().mockResolvedValue({ ok: true }),
-    getHistory: vi
-      .fn()
-      .mockResolvedValue({
-        seen: [],
-        preferences: defaultAssistantPreferences(),
-      }),
-    markSeen: vi.fn().mockResolvedValue(undefined),
-    unmarkSeen: vi.fn().mockResolvedValue(undefined),
-    getStorage: vi.fn().mockResolvedValue({
-      path: "/Volumes/YourNAS/pt",
-      mounted: true,
-      ready: true,
-      totalBytes: 5.4 * 1024 ** 4,
-      usedBytes: 4 * 1024 ** 4,
-      freeBytes: 1.4 * 1024 ** 4,
-    }),
+const first: ReleaseSummary = { id:"release-1", title:"Interstellar.2014.2160p.BluRay.x265", indexer:"TJUPT", protocol:"torrent", size:42*1024**3, seeders:28, leechers:3, grabs:4, ageDays:3, categories:[], resolution:"2160p", codec:"HEVC", freeleech:false };
+const second: ReleaseSummary = {...first,id:"release-2",title:"Interstellar.2014.1080p.BluRay.x264",resolution:"1080p"};
+function makeClient() {
+  return {
+    getSession:vi.fn().mockResolvedValue({paired:true,csrfToken:"test-csrf"}),
+    getHealth:vi.fn().mockResolvedValue({status:"ok",version:"test",pairingRequired:false,capabilities:{grab:{enabled:true}}}),
+    pair:vi.fn().mockResolvedValue({paired:true,csrfToken:"paired-csrf"}),
+    search:vi.fn().mockResolvedValue({query:"Interstellar",intent:{searchTerm:"Interstellar"},total:2,elapsedMs:10,releases:[first,second]}),
+    grabPreview:vi.fn().mockImplementation(async(id:string)=>({release:id===first.id?first:second,nasMounted:true,duplicate:false,destination:"/pt",initialState:"started"})),
+    grab:vi.fn().mockResolvedValue({accepted:true,initialState:"started",message:"sent"}),
+    getTorrents:vi.fn().mockResolvedValue([]),getStorage:vi.fn().mockResolvedValue({mounted:true,ready:true}),
+    torrentAction:vi.fn().mockResolvedValue({ok:true}),
+    getDiscoveryCollection:vi.fn(),createAssistantTurn:vi.fn(),getHistory:vi.fn(),
   };
+}
+async function mount(client=makeClient()) {
+  render(<App client={client as unknown as ApiClient}/>);
+  await screen.findByRole("searchbox");
   return client;
 }
-
-async function searchOnce() {
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("tab", { name: "搜索" }));
-  const input = await screen.findByPlaceholderText("输入电影或剧集名称");
-  await user.type(input, "星际穿越");
-  await user.click(screen.getByRole("button", { name: "发送搜索" }));
-  await screen.findByRole("button", { name: "星际穿越，2014，电影" });
+async function search() {
+  const user=userEvent.setup();
+  await user.type(screen.getByRole("searchbox"),"Interstellar");
+  await user.click(within(screen.getByRole("search")).getByRole("button",{name:"搜索"}));
+  await screen.findByText(first.title);
   return user;
 }
 
-describe("片源助手客户端", () => {
-  it.each([false, true])(
-    "updates an open recommendation inspector without replacing an explicit refresh (%s)",
-    async (manualRefresh) => {
-      const client = makeClient();
-      let emit!: (value: AssistantTurnResponse) => void;
-      let finish!: (value: AssistantTurnResponse) => void;
-      let initial!: AssistantTurnResponse;
-      client.createAssistantTurnStream = vi.fn(
-        async (request, _csrf, onSnapshot) => {
-          emit = onSnapshot;
-          initial = {
-            conversationId: "11111111-1111-4111-8111-111111111111",
-            turnId: "22222222-2222-4222-8222-222222222222",
-            clientTurnId: request.clientTurnId,
-            text: "推荐这1部。",
-            preferences: defaultAssistantPreferences(),
-            warnings: [],
-            phase: "checking",
-            recommendations: [
-              {
-                cardId: "card_live_12345678",
-                mediaId: searchMediaItem.id,
-                mediaType: "movie",
-                title: searchMediaItem.title,
-                year: searchMediaItem.year,
-                genres: [],
-                summary: searchMediaItem.summary,
-                reason: "适合科幻观影。",
-                evidenceIds: [],
-                constraintResults: [],
-                availability: "unchecked",
-                rankedReleases: [],
-                identityStatus: "verified",
-              },
-            ],
-          };
-          onSnapshot(initial);
-          return new Promise<AssistantTurnResponse>((resolve) => {
-            finish = resolve;
-          });
-        },
-      );
-      render(<App client={client} />);
-      const user = userEvent.setup();
-      await user.click(await screen.findByRole("tab", { name: "AI 推荐" }));
-      await user.type(
-        screen.getByLabelText("描述想看的类型和要求"),
-        "科幻电影",
-      );
-      await user.click(screen.getByRole("button", { name: "发送搜索" }));
-      await user.click(await screen.findByRole("button", { name: "查看详情" }));
-      await screen.findByText("这部作品尚未检查片源，请显式刷新后查看候选。");
-      if (manualRefresh) {
-        vi.mocked(client.refreshDiscoveryMediaReleases).mockResolvedValue({
-          itemId: searchMediaItem.id,
-          query: "manual",
-          status: "available",
-          checkedAt: new Date().toISOString(),
-          snapshotId: "manual_snapshot_1234",
-          total: 1,
-          releases: [{ ...release, title: "手动刷新版本" }],
-        });
-        await user.click(screen.getByRole("button", { name: "重新检查片源" }));
-        await screen.findByText("手动刷新版本");
-      }
-      const complete: AssistantTurnResponse = {
-        ...initial,
-        phase: "complete",
-        recommendations: [
-          {
-            ...initial.recommendations[0]!,
-            availability: "available",
-            checkedAt: new Date().toISOString(),
-            snapshotId: "stream_snapshot_1234",
-            rankedReleases: [
-              {
-                ...release,
-                resolution: "2160p",
-                title: "后台查到的版本",
-                rank: 1,
-                reasonCodes: [],
-                matchStatus: "confirmed",
-              },
-            ],
-          },
-        ],
-      };
-      await act(async () => {
-        emit(complete);
-        finish(complete);
-      });
-      const candidates = await screen.findByRole("radiogroup", {
-        name: "候选片源列表",
-      });
-      expect(
-        within(candidates).getByText(
-          manualRefresh ? "手动刷新版本" : "后台查到的版本",
-        ),
-      ).toBeInTheDocument();
-      expect(client.grab).not.toHaveBeenCalled();
-    },
-  );
-  it("compresses nested Prowlarr categories for narrow screens", () => {
-    expect(
-      formatCategories([
-        "Movies",
-        "Movies/Foreign",
-        "Movies/Other",
-        "Movies/UHD",
-        "Movies/BluRay",
-        "Movies/3D",
-      ]),
-    ).toBe("Foreign / UHD / BluRay / 3D");
-  });
-
-  it("shows the focused six-digit pairing gate and pairs the device", async () => {
-    const client = makeClient({ paired: false });
-    render(<App client={client} />);
-
-    const codeInput = await screen.findByLabelText("六位配对码");
-    expect(document.activeElement).toBe(codeInput);
-    const user = userEvent.setup();
-    await user.type(codeInput, "12a3456");
-    expect((codeInput as HTMLInputElement).value).toBe("123456");
-    await user.click(screen.getByRole("button", { name: "配对设备" }));
-
-    await user.click(await screen.findByRole("tab", { name: "搜索" }));
-    await screen.findByPlaceholderText("输入电影或剧集名称");
-    expect(client.pair).toHaveBeenCalledWith({ code: "123456" });
-  });
-
-  it("opens with a discovery list and reuses the existing release preview flow", async () => {
+describe("精简版片源助手",()=>{
+  it("allows searches while the dependency check is still pending", async () => {
     const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
+    let finishHealth!: (value: ServiceHealth) => void;
+    client.getHealth.mockImplementationOnce(() => new Promise(resolve => { finishHealth = resolve; }));
 
-    expect(await screen.findByText("奥德赛")).not.toBeNull();
-    expect(await screen.findByText("有资源 1")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: /奥德赛，第 1 名/ }));
-    expect(
-      await screen.findByRole("button", { name: "演员甲" }),
-    ).not.toBeNull();
-    expect(
-      await screen.findByRole("button", { name: "演员乙" }),
-    ).not.toBeNull();
-    expect(await screen.findByText(release.title)).not.toBeNull();
-    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
+    await mount(client);
+    const user = await search();
+    expect(screen.queryByText("正在连接片源服务…")).not.toBeInTheDocument();
+    const indicator = screen.getByRole("button", { name: "服务状态：检查中" });
+    await user.hover(indicator);
+    const details = screen.getByRole("region", { name: "服务状态详情" });
+    expect(within(details).getAllByText("未确认")).toHaveLength(3);
 
-    expect(await screen.findByText("已选择 · 01")).not.toBeNull();
-    expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
-    expect(client.grab).not.toHaveBeenCalled();
-  });
+    await act(async () => finishHealth({
+      status: "degraded", version: "test", pairingRequired: false,
+      services: { prowlarr: true, qbittorrent: false, nasMounted: false },
+    }));
+    expect(indicator).toHaveAccessibleName("服务状态：部分服务异常");
+    expect(within(details).getByText("未就绪")).toBeVisible();
+    await user.unhover(indicator);
+    expect(details).not.toBeVisible();
 
-  it("opens the actor index and returns to the selected work", async () => {
-    const client = makeClient();
-    vi.mocked(client.getDiscoveryActor).mockResolvedValue({
-      id: "actor-1",
-      name: "演员甲",
-      latinName: "Actor A",
-      intro: "演员 / 导演",
-      works: [
-        {
-          id: "work-1",
-          title: "演员甲的电影",
-          year: "2025",
-          rating: 8.8,
-          mediaType: "movie",
-          genres: ["剧情"],
-          summary: "一段故事。",
-          sourceUrl: "https://movie.douban.com/subject/work-1/",
-        },
-      ],
-      page: 1,
-      pageSize: 10,
-      total: 1,
-      hasNext: false,
-    });
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(
-      await screen.findByRole("button", { name: /奥德赛，第 1 名/ }),
-    );
-    await user.click(await screen.findByRole("button", { name: "演员甲" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "演员甲" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("演员甲的电影")).toBeInTheDocument();
-    expect(client.getDiscoveryActor).toHaveBeenCalledWith(
-      "演员甲",
-      "csrf-test",
-      1,
-      10,
-    );
-
-    await user.click(screen.getByRole("button", { name: "返回作品详情" }));
-    expect(
-      await screen.findByRole("heading", { name: "奥德赛", level: 2 }),
-    ).toBeInTheDocument();
-  });
-
-  it("uses the forced refresh API for discovery inspector retries", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(
-      await screen.findByRole("button", { name: /奥德赛，第 1 名/ }),
-    );
-    await screen.findByText(release.title);
-    await user.click(screen.getByRole("button", { name: "重新检查片源" }));
-
-    await waitFor(() =>
-      expect(client.refreshDiscoveryMediaReleases).toHaveBeenCalledWith(
-        "movie",
-        discoveryItem.id,
-        "csrf-test",
-        10,
-      ),
-    );
-    expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith(
-      "movie",
-      discoveryItem.id,
-      "csrf-test",
-      10,
-    );
-  });
-
-  it("renders a user query and works only, leaving releases to the selected work", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-
-    await searchOnce();
-
-    expect(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    ).not.toBeNull();
-    expect(
-      screen.getByText("找到 1 部作品，选择作品查看详情和片源。"),
-    ).not.toBeNull();
-    expect(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    ).not.toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "选择" }),
-    ).not.toBeInTheDocument();
-    expect(client.searchDiscoveryMedia).toHaveBeenCalledWith(
-      "星际穿越",
-      "csrf-test",
-      10,
-    );
-    expect(client.search).not.toHaveBeenCalled();
-  });
-
-  it("runs an explicit release-only fallback without changing the media-first default", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("tab", { name: "搜索" }));
-    await user.click(screen.getByRole("tab", { name: "片源直搜" }));
-    const input = screen.getByPlaceholderText(
-      "输入片名、1080p、10GB 以内等条件",
-    );
-    await user.type(input, "星际穿越 1080p 10GB 以内");
-    await user.click(screen.getByRole("button", { name: "发送搜索" }));
-
-    expect(await screen.findByText(release.title)).toBeInTheDocument();
-    expect(client.search).toHaveBeenCalledWith(
-      { query: "星际穿越 1080p 10GB 以内", limit: 20 },
-      "csrf-test",
-    );
-    expect(client.searchDiscoveryMedia).not.toHaveBeenCalled();
-    expect(screen.getByText(/关键词 星际穿越/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "选择" }));
-    expect(await screen.findByText("已选择 · 01")).toBeInTheDocument();
-    expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
-    expect(client.grab).not.toHaveBeenCalled();
-  });
-
-  it("opens title suggestions in the same media inspector as discovery entries", async () => {
-    const client = makeClient();
-    const media = searchMediaItem;
-    vi.mocked(client.searchDiscoveryMedia).mockResolvedValue({
-      query: "星际穿越",
-      total: 1,
-      items: [media],
-    });
-    vi.mocked(client.getDiscoveryMediaDetails).mockResolvedValue({
-      itemId: media.id,
-      actors: [{ name: "演员甲" }],
-      directors: ["导演甲"],
-    });
-    vi.mocked(client.getDiscoveryMediaReleases).mockResolvedValue({
-      itemId: media.id,
-      query: "Interstellar 2014",
-      status: "available",
-      checkedAt: "2026-08-29T00:00:01.000Z",
-      total: 1,
-      releases: [release],
-    });
-    render(<App client={client} />);
-    const user = await searchOnce();
-
-    await user.click(
-      await screen.findByRole("button", { name: "星际穿越，2014，电影" }),
-    );
-
-    expect(
-      await screen.findByRole("heading", { name: "星际穿越", level: 2 }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText(release.title)).toBeInTheDocument();
-    await waitFor(() => {
-      expect(client.getDiscoveryMediaDetails).toHaveBeenCalledWith(
-        "movie",
-        media.id,
-        "csrf-test",
-      );
-      expect(client.getDiscoveryMediaReleases).toHaveBeenCalledWith(
-        "movie",
-        media.id,
-        "csrf-test",
-        10,
-      );
-    });
-  });
-
-  it("keeps actor details in the current search inspector and clears them only when changing mode", async () => {
-    const client = makeClient();
-    vi.mocked(client.getDiscoveryMediaDetails).mockResolvedValue({
-      itemId: searchMediaItem.id,
-      actors: [{ name: "演员甲" }],
-      directors: ["导演甲"],
-    });
-    vi.mocked(client.getDiscoveryActor).mockResolvedValue({
-      id: "actor-1",
-      name: "演员甲",
-      latinName: "Actor A",
-      intro: "演员 / 导演",
-      works: [],
-      page: 1,
-      pageSize: 10,
-      total: 0,
-      hasNext: false,
-    });
-    render(<App client={client} />);
-    const user = await searchOnce();
-
-    await user.click(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    );
-    await user.click(await screen.findByRole("button", { name: "演员甲" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "演员甲" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "影视作品" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "搜索" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(client.getDiscoveryActor).toHaveBeenCalledWith(
-      "演员甲",
-      "csrf-test",
-      1,
-      10,
-    );
-
-    await user.click(screen.getByRole("tab", { name: "发现" }));
-    expect(
-      await screen.findByRole("tab", { name: "热门电影" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "演员甲" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("previews on selection and only sends confirm:true after explicit grab", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = await searchOnce();
-
-    await user.click(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    );
-    await screen.findByText(release.title);
-    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
-    await screen.findByText("已选择 · 01");
-    expect(client.grabPreview).toHaveBeenCalledWith("release-1", "csrf-test");
-    expect(client.grab).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "加入下载" }));
-    await waitFor(() =>
-      expect(client.grab).toHaveBeenCalledWith(
-        { releaseId: "release-1", confirm: true },
-        "csrf-test",
-      ),
-    );
-    expect(await screen.findByText("当前状态：已开始")).not.toBeNull();
-    expect(client.getTorrents).toHaveBeenCalledWith("csrf-test");
-  });
-
-  it("keeps the selected release visible when a grab is disabled", async () => {
-    const grab = vi
-      .fn()
-      .mockRejectedValue(
-        new ApiError("下载功能当前关闭。", 403, "GRAB_DISABLED"),
-      );
-    const client = makeClient({ grab });
-    render(<App client={client} />);
-    const user = await searchOnce();
-
-    await user.click(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    );
-    await screen.findByText(release.title);
-    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
-    await screen.findByText("已选择 · 01");
-    await user.click(screen.getByRole("button", { name: "加入下载" }));
-
-    expect(
-      await screen.findByText("下载操作当前关闭，已保留所选片源。"),
-    ).not.toBeNull();
-    expect(screen.getByText("已选择 · 01")).not.toBeNull();
-    expect(screen.getByText("/Volumes/YourNAS/pt")).not.toBeNull();
-  });
-
-  it("prevents confirmation when qBittorrent already has the release", async () => {
-    const client = makeClient();
-    vi.mocked(client.grabPreview).mockResolvedValue({
-      release,
-      destination: "/Volumes/YourNAS/pt",
-      nasMounted: true,
-      duplicate: true,
-      initialState: "stopped",
-    });
-    render(<App client={client} />);
-    const user = await searchOnce();
-
-    await user.click(
-      screen.getByRole("button", { name: "星际穿越，2014，电影" }),
-    );
-    await screen.findByText(release.title);
-    await user.click(screen.getByRole("radio", { name: /Interstellar\.2014/ }));
-    expect(await screen.findByText("已有相同任务")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "加入下载" })).toBeDisabled();
-    expect(client.grab).not.toHaveBeenCalled();
-  });
-
-  it("marks a work as seen and unmarks it from the shared history", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(
-      await screen.findByRole("button", { name: /奥德赛，第 1 名/ }),
-    );
-    await user.click(await screen.findByRole("button", { name: "标记已看" }));
-    await waitFor(() =>
-      expect(client.markSeen).toHaveBeenCalledWith(
-        {
-          mediaId: discoveryItem.id,
-          mediaType: "movie",
-          title: discoveryItem.title,
-        },
-        "csrf-test",
-      ),
-    );
-    expect(
-      await screen.findByRole("button", { name: "取消已看" }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "取消已看" }));
-    await waitFor(() =>
-      expect(client.unmarkSeen).toHaveBeenCalledWith(
-        "movie",
-        discoveryItem.id,
-        "csrf-test",
-      ),
-    );
-    expect(
-      await screen.findByRole("button", { name: "标记已看" }),
-    ).toBeInTheDocument();
-  });
-
-  it("opens a read-only service status dialog that separates configured from enabled", async () => {
-    const client = makeClient();
-    vi.mocked(client.getHealth).mockResolvedValue({
-      status: "ok",
-      version: "test",
-      pairingRequired: false,
+    client.getHealth.mockResolvedValueOnce({
+      status: "ok", version: "test", pairingRequired: false,
       services: { prowlarr: true, qbittorrent: true, nasMounted: true },
-      capabilities: {
-        ai: { enabled: true, configured: true, model: "deepseek-flash" },
-        webSearch: { enabled: false, configured: true },
-        grab: { enabled: false },
-        persistence: { enabled: true },
-      },
     });
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("button", { name: "服务状态" }));
-    const dialog = await screen.findByRole("dialog", {
-      name: "服务与能力状态",
-    });
-    expect(within(dialog).getByText("deepseek-flash")).toBeInTheDocument();
-    expect(within(dialog).getByText("AI 推荐").closest("li")).toHaveTextContent(
-      "已启用",
-    );
-    expect(
-      within(dialog).getByText("联网搜索").closest("li"),
-    ).toHaveTextContent("已配置 · 未启用");
-    expect(
-      within(dialog).getByText("下载开关").closest("li"),
-    ).toHaveTextContent("已关闭");
-    expect(
-      within(dialog).getByText("已看与偏好持久化").closest("li"),
-    ).toHaveTextContent("已启用");
-
+    await user.click(indicator);
+    await user.click(within(details).getByRole("button", { name: "重新检查" }));
+    await screen.findByRole("button", { name: "服务状态：正常" });
+    expect(within(details).getAllByText("正常")).toHaveLength(4);
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(details).not.toBeVisible();
+    expect(indicator).toHaveFocus();
   });
 
-  it("keeps focus inside the status dialog and returns it to the trigger", async () => {
+  it("reports a timed-out health check without hiding the search page", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient();
+      client.getHealth.mockImplementationOnce((signal: AbortSignal) => new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }));
+      render(<App client={client as unknown as ApiClient}/>);
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(screen.getByRole("searchbox")).toBeVisible();
+      expect(screen.getByRole("button", { name: "服务状态：暂不可用" })).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("has only search/tasks and performs no discovery, AI or history requests",async()=>{
+    const client=await mount();
+    expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button=>button.textContent)).toEqual(["搜索","任务"]);
+    expect(client.getDiscoveryCollection).not.toHaveBeenCalled();expect(client.createAssistantTurn).not.toHaveBeenCalled();expect(client.getHistory).not.toHaveBeenCalled();
+    expect(screen.getByText("输入片名或发布名开始搜索")).toBeVisible();
+  });
+  it("searches releases directly and selection alone makes no preview or grab requests",async()=>{
+    const client=await mount();const user=await search();
+    expect(client.search).toHaveBeenCalledWith({query:"Interstellar",limit:50},"test-csrf");
+    await user.click(screen.getByLabelText(`选择 ${first.title}`));
+    expect(screen.getByText("已选 1 个")).toBeVisible();expect(client.grabPreview).not.toHaveBeenCalled();expect(client.grab).not.toHaveBeenCalled();
+  });
+  it("preflights each checked release then explicitly downloads and clears accepted selections",async()=>{
+    const client=await mount();const user=await search();
+    await user.click(screen.getByLabelText("选择本页全部片源"));
+    await user.click(screen.getByRole("button",{name:"下载所选（2）"}));
+    await screen.findByText("已添加 2 个，未添加 0 个");
+    expect(client.grab.mock.calls).toEqual([[{releaseId:first.id,confirm:true},"test-csrf"],[{releaseId:second.id,confirm:true},"test-csrf"]]);
+    expect(client.grabPreview.mock.invocationCallOrder[0]).toBeLessThan(client.grab.mock.invocationCallOrder[0]);
+    expect(screen.getByLabelText(`选择 ${first.title}`)).not.toBeChecked();
+    expect(screen.getByRole("button",{name:"下载所选"})).toBeDisabled();
+  });
+  it.each(["nas","duplicate","expired"])("does not grab when preflight fails: %s",async(kind)=>{
+    const client=makeClient();
+    if(kind==="expired")client.grabPreview.mockRejectedValue(new Error("片源已过期"));
+    else client.grabPreview.mockResolvedValue({...await client.grabPreview(first.id),nasMounted:kind!=="nas",duplicate:kind==="duplicate"});
+    await mount(client);const user=await search();await user.click(screen.getByLabelText(`选择 ${first.title}`));await user.click(screen.getByRole("button",{name:"下载所选（1）"}));
+    await screen.findByText("已添加 0 个，未添加 1 个");expect(client.grab).not.toHaveBeenCalled();expect(screen.getByLabelText(`选择 ${first.title}`)).toBeChecked();
+  });
+  it("preserves failed selections and never retries an already accepted item",async()=>{
+    const client=makeClient();client.grab.mockResolvedValueOnce({accepted:true,initialState:"started",message:"sent"}).mockRejectedValueOnce(new Error("网络中断"));
+    await mount(client);const user=await search();await user.click(screen.getByLabelText("选择本页全部片源"));await user.click(screen.getByRole("button",{name:"下载所选（2）"}));
+    await screen.findByText("已添加 1 个，未添加 1 个");expect(screen.getByLabelText(`选择 ${first.title}`)).not.toBeChecked();expect(screen.getByLabelText(`选择 ${second.title}`)).toBeChecked();expect(screen.getByText(/请先到任务页核对/)).toBeVisible();
+    await user.click(screen.getByRole("button",{name:"下载所选（1）"}));await screen.findByText("已添加 1 个，未添加 0 个");expect(client.grab.mock.calls.map(call=>call[0].releaseId)).toEqual([first.id,second.id,second.id]);
+  });
+  it("prevents double submission and locks search and selection throughout a batch",async()=>{
+    const client=makeClient();let finish!:(value:unknown)=>void;client.grab.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+    await mount(client);const user=await search();await user.click(screen.getByLabelText(`选择 ${first.title}`));const button=screen.getByRole("button",{name:"下载所选（1）"});await user.dblClick(button);
+    await waitFor(()=>expect(client.grab).toHaveBeenCalledTimes(1));expect(screen.getByRole("searchbox")).toBeDisabled();expect(screen.getByLabelText("选择本页全部片源")).toBeDisabled();expect(screen.getByRole("status")).toHaveTextContent("正在提交下载请求（1 / 1）");
+    await act(async()=>finish({accepted:true,initialState:"started",message:"sent"}));await screen.findByText("已添加 1 个，未添加 0 个");
+  });
+  it("clears hidden selections when changing resolution",async()=>{
+    await mount();const user=await search();await user.click(screen.getByLabelText(`选择 ${second.title}`));await user.selectOptions(screen.getByLabelText("清晰度"),"2160p");
+    expect(screen.queryByText(second.title)).not.toBeInTheDocument();expect(screen.getByText("已选 0 个")).toBeVisible();
+  });
+  it("paginates the returned resources and selects only the current page",async()=>{
+    const client=makeClient();client.search.mockResolvedValue({query:"x",intent:{searchTerm:"x"},total:21,elapsedMs:1,releases:Array.from({length:21},(_,i)=>({...first,id:`r${i}`,title:i===0?first.title:`Release ${i}`}))});
+    await mount(client);const user=await search();await user.click(screen.getByLabelText("选择本页全部片源"));expect(screen.getByText("已选 20 个")).toBeVisible();await user.click(screen.getByRole("button",{name:"下一页"}));expect(screen.getByText("Release 20")).toBeVisible();expect(screen.getByLabelText("选择本页全部片源")).not.toBeChecked();await user.click(screen.getByLabelText("选择本页全部片源"));expect(screen.getByText("已选 21 个")).toBeVisible();
+  });
+  it("invalidates prior selections as soon as the search term is edited",async()=>{
+    const client=await mount();const user=await search();await user.click(screen.getByLabelText(`选择 ${first.title}`));await user.type(screen.getByRole("searchbox")," Dune");
+    expect(screen.queryByText(first.title)).not.toBeInTheDocument();expect(screen.getByRole("button",{name:"下载所选"})).toBeDisabled();expect(client.grab).not.toHaveBeenCalled();
+  });
+  it("clears prior resources on a new failed search",async()=>{
+    const client=await mount();const user=await search();client.search.mockRejectedValueOnce(new Error("搜索服务离线"));await user.click(within(screen.getByRole("search")).getByRole("button",{name:"搜索"}));await screen.findByText("搜索服务离线");expect(screen.queryByText(first.title)).not.toBeInTheDocument();
+  });
+  it("blocks downloads when the server disables grabs",async()=>{
+    const client=makeClient();client.getHealth.mockResolvedValue({status:"ok",version:"test",pairingRequired:false,capabilities:{grab:{enabled:false}}});await mount(client);const user=await search();await user.click(screen.getByLabelText(`选择 ${first.title}`));expect(screen.getByRole("button",{name:"下载所选（1）"})).toBeDisabled();
+  });
+  it("shows unknown seeders instead of a fabricated zero",async()=>{
+    const client=makeClient();client.search.mockResolvedValue({query:"x",intent:{searchTerm:"x"},total:1,elapsedMs:1,releases:[{...first,evidence:{resolution:"upstream",codec:"upstream",size:"unknown",seeders:"unknown",season:"unknown"}}]});await mount(client);await search();expect(within(screen.getByText(first.title).closest("tr")!).getAllByText("—")).toHaveLength(2);
+  });
+  it("keeps pairing available and loads tasks only after a valid session",async()=>{
+    const client=makeClient();client.getSession.mockResolvedValue({paired:false,csrfToken:""});render(<App client={client as unknown as ApiClient}/>);await screen.findByRole("heading",{name:"输入配对码"});expect(client.getTorrents).not.toHaveBeenCalled();const user=userEvent.setup();await user.type(screen.getByLabelText("六位配对码"),"123456");await user.click(screen.getByRole("button",{name:"配对设备"}));await screen.findByRole("searchbox");expect(client.getTorrents).toHaveBeenCalledWith("paired-csrf");
+  });
+
+  it("shows an indeterminate search state until the real response arrives", async () => {
     const client = makeClient();
-    render(<App client={client} />);
+    let finishSearch!: (response: SearchResponse) => void;
+    client.search.mockImplementationOnce(() => new Promise(resolve => { finishSearch = resolve; }));
+
+    await mount(client);
     const user = userEvent.setup();
+    await user.type(screen.getByRole("searchbox"), "Interstellar");
+    await user.click(within(screen.getByRole("search")).getByRole("button", { name: "搜索" }));
 
-    const trigger = await screen.findByRole("button", { name: "服务状态" });
-    await user.click(trigger);
-    const dialog = await screen.findByRole("dialog", {
-      name: "服务与能力状态",
-    });
-    const close = within(dialog).getByRole("button", { name: "关闭状态窗口" });
-    expect(document.activeElement).toBe(close);
+    expect(screen.getByText("正在搜索片源…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "搜索中…" })).toBeDisabled();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
 
-    await user.tab();
-    expect(document.activeElement).toBe(close);
-
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(trigger);
-  });
-
-  it("opens the task view and pauses a task through the protected action route", async () => {
-    const client = makeClient();
-    const torrentHash = "a".repeat(40);
-    vi.mocked(client.getTorrents).mockResolvedValue([
-      {
-        hash: torrentHash,
-        name: "Interstellar 2014 2160p",
-        progress: 0.42,
-        state: "downloading",
-        size: 20 * 1024 ** 3,
-        downloadSpeed: 5 * 1024 ** 2,
-        uploadSpeed: 0,
-        eta: 600,
-        savePath: "/Volumes/YourNAS/pt",
-      },
-    ]);
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("tab", { name: "任务" }));
-    expect(
-      await screen.findByText("Interstellar 2014 2160p"),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "暂停" }));
-    await waitFor(() =>
-      expect(client.torrentAction).toHaveBeenCalledWith(
-        { action: "pause", hashes: [torrentHash] },
-        "csrf-test",
-      ),
-    );
-  });
-
-  it("shows header health and runtime rows and refreshes runtime status", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    expect(
-      await screen.findByText("TJUPT · qBittorrent · NAS 已连接"),
-    ).not.toBeNull();
-    expect(await screen.findByText(/1\.4 TB/)).not.toBeNull();
-    expect(screen.getByText(/NAS 剩余/)).not.toBeNull();
-    expect(screen.getByText(/下载中/)).not.toBeNull();
-
-    vi.mocked(client.getStorage).mockClear();
-    vi.mocked(client.getTorrents).mockClear();
-
-    await user.click(screen.getByRole("button", { name: "刷新状态" }));
-    await waitFor(() => {
-      expect(client.getStorage).toHaveBeenCalledWith("csrf-test");
-      expect(client.getTorrents).toHaveBeenCalledWith("csrf-test");
-    });
-  });
-
-  it("refreshes status without replacing the current workspace", async () => {
-    const client = makeClient();
-    render(<App client={client} />);
-    const user = userEvent.setup();
-
-    expect(await screen.findByRole("tab", { name: "热门电影" })).not.toBeNull();
-
-    vi.mocked(client.getSession).mockImplementation(
-      () => new Promise(() => undefined),
-    );
-    await user.click(screen.getByRole("button", { name: "刷新状态" }));
-
-    expect(screen.getByRole("tab", { name: "热门电影" })).not.toBeNull();
-  });
-
-  it("shows compact runtime status without opening the detail panel", async () => {
-    const client = makeClient();
-    vi.mocked(client.getTorrents).mockResolvedValue([
-      {
-        hash: "torrent-hash",
-        name: "Interstellar 2014 2160p",
-        progress: 0.72,
-        state: "downloading",
-        size: 20 * 1024 ** 3,
-        downloadSpeed: 12.4 * 1024 ** 2,
-        uploadSpeed: 0,
-        eta: 18 * 60,
-        savePath: "/Volumes/YourNAS/pt",
-      },
-    ]);
-    render(<App client={client} />);
-
-    expect(await screen.findByText("NAS 剩余 1.4 TB")).not.toBeNull();
-    expect(await screen.findByText("下载中 1")).not.toBeNull();
-    expect(
-      screen.queryByRole("heading", { name: "下载活动" }),
-    ).not.toBeInTheDocument();
+    await act(async () => finishSearch({
+      query: "Interstellar",
+      intent: { searchTerm: "Interstellar" },
+      total: 2,
+      elapsedMs: 10,
+      releases: [first, second],
+    }));
+    expect(screen.getByText(first.title)).toBeVisible();
   });
 });

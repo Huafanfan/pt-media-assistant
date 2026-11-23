@@ -23,6 +23,10 @@ import {
       torrentStateLabel,
 } from "../torrent-format";
 import { formatBytes, formatCategories } from "./ReleaseList";
+import {
+      COMPLETENESS_LABELS,
+      summarizeCoverage,
+} from "./release-selection-labels";
 
 function stateLabel(state: "started" | "stopped"): string {
       return state === "started" ? "已开始" : "已停止";
@@ -314,6 +318,73 @@ export function SelectionPanel({
                                           <p className="selection-release-title">
                                                 {release.title}
                                           </p>
+                                    ) : null}
+                                    {selection.ranked ? (
+                                          <div className="selection-coverage">
+                                                <p className="selection-coverage-line">
+                                                      标题标注范围（未核验）：
+                                                      {summarizeCoverage(
+                                                            selection.ranked
+                                                                  .coverage,
+                                                      )}
+                                                      {" · "}
+                                                      完整性：
+                                                      {selection.ranked
+                                                            .coverage.scope ===
+                                                      "movie"
+                                                            ? "不适用"
+                                                            : COMPLETENESS_LABELS[
+                                                                  selection
+                                                                        .ranked
+                                                                        .coverage
+                                                                        .completeness
+                                                              ]}
+                                                </p>
+                                                {selection.ranked.warnings
+                                                      .length > 0 ? (
+                                                      <ul className="selection-coverage-warnings">
+                                                            {selection.ranked.warnings
+                                                                  .slice(0, 4)
+                                                                  .map(
+                                                                        (
+                                                                              warning,
+                                                                        ) => (
+                                                                              <li
+                                                                                    key={`${warning.code}-${warning.message}`}
+                                                                              >
+                                                                                    {
+                                                                                          warning.message
+                                                                                    }
+                                                                              </li>
+                                                                        ),
+                                                                  )}
+                                                      </ul>
+                                                ) : null}
+                                                {selection.ranked.constraintResults.filter(
+                                                      (result) =>
+                                                            result.status !==
+                                                            "met",
+                                                ).length > 0 ? (
+                                                      <ul className="selection-coverage-warnings">
+                                                            {selection.ranked.constraintResults
+                                                                  .filter(
+                                                                        (result) =>
+                                                                              result.status !==
+                                                                              "met",
+                                                                  )
+                                                                  .slice(0, 4)
+                                                                  .map((result) => (
+                                                                        <li
+                                                                              key={`constraint-${result.key}`}
+                                                                        >
+                                                                              {
+                                                                                    result.detail
+                                                                              }
+                                                                        </li>
+                                                                  ))}
+                                                      </ul>
+                                                ) : null}
+                                          </div>
                                     ) : null}
                                     {!preview && !previewError ? (
                                           <p className="muted-line selection-loading">

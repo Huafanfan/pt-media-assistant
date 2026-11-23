@@ -13,6 +13,12 @@ import type {
   ReleaseSummary,
 } from "../../src/shared/contracts";
 import { DiscoveryInspector } from "../../src/client/components/DiscoveryInspector";
+import {
+  selectionPreferencesSchema,
+  selectionTargetSchema,
+  type ReleaseSelectionResponse,
+} from "../../src/shared/release-selection";
+import { rankSelection } from "../../src/server/release-selection/ranking";
 
 const item: DiscoveryItem = {
   id: "subject-4",
@@ -382,5 +388,82 @@ describe("DiscoveryInspector", () => {
     await user.click(reset);
     expect(screen.getByRole("combobox", { name: /季/ })).toHaveValue("all");
     expect(screen.getByText("Show S01 1080p")).toBeInTheDocument();
+  });
+
+  it("renders the structured selection panel when a snapshot is available", async () => {
+    const user = userEvent.setup();
+    const target = selectionTargetSchema.parse({
+      kind: "series",
+      mode: "explicit",
+      season: 2,
+      episodes: [1, 2],
+    });
+    const preferences = selectionPreferencesSchema.parse({});
+    const ranked = rankSelection({
+      media: {
+        mediaType: "tv",
+        itemId: item.id,
+        title: item.title,
+        ...(item.originalTitle ? { originalTitle: item.originalTitle } : {}),
+        ...(item.year ? { year: item.year } : {}),
+      },
+      releases: response.releases,
+      target,
+      preferences,
+    });
+    const selectionResponse: ReleaseSelectionResponse = {
+      snapshot: {
+        id: "snap-aaaaaaaa",
+        kind: "discovery",
+        query: item.title,
+        checkedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        actionableUntil: new Date(Date.now() + 60_000).toISOString(),
+        stale: false,
+        releaseCount: response.releases.length,
+        media: { mediaType: "tv", itemId: item.id, title: item.title },
+      },
+      target,
+      preferences,
+      revision: {
+        snapshotId: "snap-aaaaaaaa",
+        targetRevision: "target-1",
+        preferencesRevision: "prefs-1",
+        algorithmVersion: "selection-1",
+        checkedAt: new Date().toISOString(),
+      },
+      groups: ranked.groups,
+      recommendations: ranked.recommendations,
+      availabilityPending: ranked.availabilityPending,
+      overlaps: ranked.overlaps,
+      warnings: ranked.warnings,
+      totalCandidates: ranked.totalCandidates,
+      eligibleCount: ranked.eligibleCount,
+      recommendedCount: ranked.recommendations.length,
+    };
+    cleanup();
+    renderInspector({
+      releaseResponse: { ...response, snapshotId: "snap-aaaaaaaa" },
+      selection: {
+        snapshot: {
+          kind: "discovery",
+          mediaType: "tv",
+          itemId: item.id,
+          snapshotId: "snap-aaaaaaaa",
+        },
+        csrfToken: "csrf",
+        defaultKind: "series",
+        loadSelection: vi.fn(
+          async () => selectionResponse,
+        ),
+      },
+    });
+    expect(
+      await screen.findByRole("heading", {
+        name: "候选片源理解与推荐",
+      }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看原始列表" }));
+    expect(screen.getByLabelText("片源筛选与排序")).toBeInTheDocument();
   });
 });

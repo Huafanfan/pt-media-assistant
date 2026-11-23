@@ -1,10 +1,6 @@
 import { useState } from "react";
-import { CircleAlert, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
-import type {
-    SeenMediaEntry,
-    TorrentAction,
-    TorrentSummary,
-} from "../../shared/contracts";
+import { Pause, Play, RefreshCw } from "lucide-react";
+import type { TorrentAction, TorrentSummary } from "../../shared/contracts";
 import {
     formatEta,
     formatRate,
@@ -14,137 +10,95 @@ import {
 import { formatBytes } from "./ReleaseList";
 import { LoadingState } from "./States";
 
-type TaskFilter = "all" | "downloading" | "completed" | "paused";
+type TaskFilter = "all" | "downloading" | "paused" | "completed";
 
 const FILTER_LABELS: Record<TaskFilter, string> = {
     all: "全部",
     downloading: "下载中",
-    completed: "已完成",
     paused: "已暂停",
+    completed: "已完成",
 };
 
 function classify(torrent: TorrentSummary): Exclude<TaskFilter, "all"> {
-    if (torrent.progress >= 1) return "completed";
     if (isPausedTorrent(torrent.state)) return "paused";
+    if (torrent.progress >= 1) return "completed";
     return "downloading";
 }
 
 function TaskRow({
     torrent,
     actionPending,
-    confirming,
-    onAskRemove,
-    onCancelRemove,
     onAction,
 }: {
     torrent: TorrentSummary;
     actionPending: boolean;
-    confirming: boolean;
-    onAskRemove: () => void;
-    onCancelRemove: () => void;
     onAction: (action: TorrentAction, hashes: string[]) => Promise<boolean>;
 }) {
     const kind = classify(torrent);
     const paused = isPausedTorrent(torrent.state);
+    const complete = torrent.progress >= 1;
     const progress = Math.max(0, Math.min(1, torrent.progress));
     const percentage = Math.round(progress * 100);
+    const stateTone = /error|missingFiles/iu.test(torrent.state)
+        ? "is-error"
+        : `is-${kind}`;
 
     return (
-        <li className={`task-row is-${kind}`}>
-            <div className="task-row-heading">
-                <h3>{torrent.name}</h3>
-                <span className={`task-state is-${kind}`}>
+        <tr className={`task-row is-${kind}`}>
+            <th className="task-name-cell" scope="row" title={torrent.name}>
+                {torrent.name}
+            </th>
+            <td className="task-progress-cell">
+                <div className="task-progress-summary">
+                    <strong>{percentage}%</strong>
+                    <span>
+                        {formatBytes(torrent.size * progress)} / {formatBytes(torrent.size)}
+                    </span>
+                </div>
+                <div
+                    className="task-progress-track"
+                    role="progressbar"
+                    aria-label={`${torrent.name} 下载进度`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={percentage}
+                >
+                    <span style={{ width: `${percentage}%` }} />
+                </div>
+            </td>
+            <td className="task-value-cell">{formatRate(torrent.downloadSpeed)}</td>
+            <td className="task-value-cell">
+                {complete || paused ? "—" : formatEta(torrent.eta)}
+            </td>
+            <td>
+                <span className={`task-state ${stateTone}`}>
                     {torrentStateLabel(torrent.state)}
                 </span>
-            </div>
-            <div
-                className="task-progress-track"
-                role="progressbar"
-                aria-label={`${torrent.name} 下载进度`}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percentage}
-            >
-                <span style={{ width: `${percentage}%` }} />
-            </div>
-            <div className="task-meta">
-                <strong>{percentage}%</strong>
-                <span>
-                    {formatBytes(torrent.size * progress)} /{" "}
-                    {formatBytes(torrent.size)}
-                </span>
-                {torrent.downloadSpeed > 0 ? (
-                    <span>↓ {formatRate(torrent.downloadSpeed)}</span>
-                ) : null}
-                {torrent.uploadSpeed > 0 ? (
-                    <span>↑ {formatRate(torrent.uploadSpeed)}</span>
-                ) : null}
-                {kind === "downloading" ? (
-                    <span>剩余 {formatEta(torrent.eta)}</span>
-                ) : null}
-            </div>
-            <div className="task-actions">
-                {confirming ? (
-                    <>
-                        <span className="task-confirm-note">
-                            <CircleAlert size={15} aria-hidden="true" />
-                            仅移除任务，保留已下载文件
-                        </span>
-                        <button
-                            className="outline-button task-remove"
-                            type="button"
-                            disabled={actionPending}
-                            onClick={() =>
-                                void onAction("remove", [torrent.hash]).then(
-                                    (ok) => {
-                                        if (ok) onCancelRemove();
-                                    },
-                                )
-                            }
-                        >
-                            {actionPending ? "正在移除…" : "确认移除"}
-                        </button>
-                        <button
-                            className="text-button"
-                            type="button"
-                            disabled={actionPending}
-                            onClick={onCancelRemove}
-                        >
-                            取消
-                        </button>
-                    </>
+            </td>
+            <td className="task-action-cell">
+                {complete && !paused ? (
+                    <span className="task-no-action" aria-label="已完成">
+                        —
+                    </span>
                 ) : (
-                    <>
-                        <button
-                            className="outline-button"
-                            type="button"
-                            disabled={actionPending}
-                            onClick={() =>
-                                void onAction(paused ? "resume" : "pause", [
-                                    torrent.hash,
-                                ])
-                            }
-                        >
-                            {paused ? (
-                                <Play size={15} aria-hidden="true" />
-                            ) : (
-                                <Pause size={15} aria-hidden="true" />
-                            )}
-                            {paused ? "继续" : "暂停"}
-                        </button>
-                        <button
-                            className="outline-button task-remove"
-                            type="button"
-                            disabled={actionPending}
-                            onClick={onAskRemove}
-                        >
-                            <Trash2 size={15} aria-hidden="true" />
-                            移除
-                        </button>
-                    </>
+                    <button
+                        className="task-action-button"
+                        type="button"
+                        disabled={actionPending}
+                        onClick={() =>
+                            void onAction(paused ? "resume" : "pause", [torrent.hash])
+                        }
+                    >
+                        {paused ? (
+                            <Play size={15} aria-hidden="true" />
+                        ) : (
+                            <Pause size={15} aria-hidden="true" />
+                        )}
+                        {paused ? "继续" : "暂停"}
+                    </button>
                 )}
-            </div>
-        </li>
+            </td>
+        </tr>
     );
 }
 
@@ -156,10 +110,6 @@ export function TaskView({
     actionPending,
     onRefresh,
     onAction,
-    seenItems = [],
-    seenError = null,
-    seenPendingKey = null,
-    onUnmarkSeen,
 }: {
     torrents: TorrentSummary[];
     loading: boolean;
@@ -168,19 +118,14 @@ export function TaskView({
     actionPending: boolean;
     onRefresh: () => void;
     onAction: (action: TorrentAction, hashes: string[]) => Promise<boolean>;
-    seenItems?: SeenMediaEntry[];
-    seenError?: string | null;
-    seenPendingKey?: string | null;
-    onUnmarkSeen?: (entry: SeenMediaEntry) => void;
 }) {
     const [filter, setFilter] = useState<TaskFilter>("all");
-    const [confirmHash, setConfirmHash] = useState<string | null>(null);
 
     const counts: Record<TaskFilter, number> = {
         all: torrents.length,
         downloading: 0,
-        completed: 0,
         paused: 0,
+        completed: 0,
     };
     for (const torrent of torrents) counts[classify(torrent)] += 1;
 
@@ -198,38 +143,34 @@ export function TaskView({
         );
 
     return (
-        <section className="task-view" aria-label="下载任务">
-            <header className="task-view-heading">
+        <section className="task-view" aria-labelledby="task-view-title">
+            <header className="task-header">
                 <div>
-                    <h1>下载任务</h1>
-                    <p>
-                        {counts.downloading > 0
-                            ? `${counts.downloading} 个进行中 · 共 ${counts.all} 个任务`
-                            : `共 ${counts.all} 个任务`}
-                    </p>
+                    <h1 id="task-view-title">下载任务</h1>
+                    <p>任务进度自动更新。</p>
                 </div>
                 <button
-                    className="icon-button small-icon-button"
+                    className="task-refresh-button"
                     type="button"
                     onClick={onRefresh}
                     disabled={loading}
-                    aria-label="刷新任务列表"
                 >
                     <RefreshCw
-                        className={loading ? "spin" : ""}
-                        size={18}
+                        className={loading ? "spin" : undefined}
+                        size={16}
                         aria-hidden="true"
                     />
+                    刷新
                 </button>
             </header>
 
             {actionError ? (
-                <p className="inline-error" role="alert">
+                <p className="task-error" role="alert">
                     {actionError}
                 </p>
             ) : null}
             {error ? (
-                <p className="inline-error" role="alert">
+                <p className="task-error" role="alert">
                     {error}
                 </p>
             ) : null}
@@ -238,10 +179,11 @@ export function TaskView({
                 {(Object.keys(FILTER_LABELS) as TaskFilter[]).map((key) => (
                     <button
                         key={key}
+                        className={`task-filter-button${filter === key ? " is-active" : ""}`}
                         type="button"
                         role="tab"
+                        aria-label={`${FILTER_LABELS[key]} ${counts[key]}`}
                         aria-selected={filter === key}
-                        className={filter === key ? "is-active" : undefined}
                         onClick={() => setFilter(key)}
                     >
                         {FILTER_LABELS[key]}
@@ -254,72 +196,43 @@ export function TaskView({
                 <LoadingState label="正在读取任务…" />
             ) : null}
             {!loading && visible.length === 0 ? (
-                <p className="muted-line">
+                <p className="task-empty" role="status">
                     {torrents.length === 0
                         ? "qBittorrent 里还没有任务。"
                         : "这个筛选下没有任务。"}
                 </p>
             ) : null}
 
-            <ul className="task-list">
-                {visible.map((torrent) => (
-                    <TaskRow
-                        key={torrent.hash || torrent.name}
-                        torrent={torrent}
-                        actionPending={actionPending}
-                        confirming={confirmHash === torrent.hash}
-                        onAskRemove={() => setConfirmHash(torrent.hash)}
-                        onCancelRemove={() => setConfirmHash(null)}
-                        onAction={onAction}
-                    />
-                ))}
-            </ul>
-
-            {seenItems.length > 0 || seenError ? (
-                <section className="seen-records" aria-label="已看记录">
-                    <header className="task-view-heading">
-                        <div>
-                            <h2>已看记录</h2>
-                            <p>已看过的作品不会再被 AI 推荐（家庭共享）。</p>
-                        </div>
-                    </header>
-                    {seenError ? (
-                        <p className="inline-error" role="alert">
-                            {seenError}
-                        </p>
-                    ) : null}
-                    {seenItems.length > 0 ? (
-                        <ul className="seen-list">
-                            {seenItems.map((entry) => {
-                                const key = `${entry.mediaType}:${entry.mediaId}`;
-                                return (
-                                    <li key={key}>
-                                        <span className="seen-title">
-                                            {entry.title}
-                                        </span>
-                                        <span className="seen-meta">
-                                            {entry.mediaType === "tv"
-                                                ? "剧集"
-                                                : "电影"}
-                                        </span>
-                                        <button
-                                            className="text-button"
-                                            type="button"
-                                            disabled={seenPendingKey === key}
-                                            onClick={() =>
-                                                onUnmarkSeen?.(entry)
-                                            }
-                                        >
-                                            {seenPendingKey === key
-                                                ? "正在更新…"
-                                                : "取消已看"}
-                                        </button>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    ) : null}
-                </section>
+            {visible.length > 0 ? (
+                <div
+                    className="task-table-scroll"
+                    role="region"
+                    aria-label="可横向滚动的下载任务表格"
+                    tabIndex={0}
+                >
+                    <table className="task-table" aria-label="下载任务列表">
+                        <thead>
+                            <tr>
+                                <th className="task-name-column" scope="col">名称</th>
+                                <th className="task-progress-column" scope="col">进度</th>
+                                <th scope="col">下载速度</th>
+                                <th scope="col">剩余时间</th>
+                                <th scope="col">状态</th>
+                                <th className="task-action-column" scope="col">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {visible.map((torrent) => (
+                                <TaskRow
+                                    key={torrent.hash || torrent.name}
+                                    torrent={torrent}
+                                    actionPending={actionPending}
+                                    onAction={onAction}
+                                />
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             ) : null}
         </section>
     );

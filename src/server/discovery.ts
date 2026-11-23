@@ -119,6 +119,14 @@ type CachedReleases = {
   response: DiscoveryReleaseResponse;
   expiresAt: number;
   releaseIds: string[];
+  media: DiscoveryMedia;
+};
+
+/** Read-only view of one live release snapshot, used by the selection engine. */
+export type DiscoverySnapshotView = {
+  snapshotId: string;
+  media: DiscoveryMedia;
+  response: DiscoveryReleaseResponse;
 };
 
 type PendingReleaseWaiter = {
@@ -185,6 +193,25 @@ function copyRelease(release: ReleaseSummary): ReleaseSummary {
       : {}),
     ...(release.codec !== undefined ? { codec: release.codec } : {}),
     ...(release.season !== undefined ? { season: release.season } : {}),
+    ...(typeof release.source === "string" ? { source: release.source } : {}),
+    ...(typeof release.hdr === "string" ? { hdr: release.hdr } : {}),
+    ...(typeof release.fileCount === "number" && release.fileCount >= 0
+      ? { fileCount: Math.floor(release.fileCount) }
+      : {}),
+    ...(Array.isArray(release.subtitleLanguages)
+      ? {
+          subtitleLanguages: release.subtitleLanguages
+            .filter((value): value is string => typeof value === "string")
+            .slice(0, 6),
+        }
+      : {}),
+    ...(Array.isArray(release.audioLanguages)
+      ? {
+          audioLanguages: release.audioLanguages
+            .filter((value): value is string => typeof value === "string")
+            .slice(0, 6),
+        }
+      : {}),
     freeleech: release.freeleech === true,
     ...(release.freeleechState === "yes" ||
     release.freeleechState === "no" ||
@@ -500,6 +527,37 @@ export class DiscoveryService {
     for (const key of [...this.releaseCache.keys()]) this.removeSnapshot(key);
   }
 
+  /**
+   * Read-only lookup used by the release-selection service.  It never
+   * triggers an upstream search: a missing or revoked snapshot returns
+   * undefined and the caller must ask the user to refresh.
+   */
+  public getReleaseSnapshot(
+    mediaType: "movie" | "tv",
+    itemId: string,
+  ): DiscoverySnapshotView | undefined {
+    const key = mediaKey(mediaType, String(itemId));
+    this.evictExpiredSnapshots();
+    const cached = this.releaseCache.get(key);
+    if (!cached || !cached.response.snapshotId) return undefined;
+    if (
+      this.prowlarr.hasRelease &&
+      cached.response.releases.some(
+        (release) => !this.prowlarr.hasRelease!(release.id),
+      )
+    ) {
+      // One revoked opaque ID invalidates the whole snapshot: a selection
+      // must never hand an expired reference back to the grab flow.
+      this.removeSnapshot(key);
+      return undefined;
+    }
+    return {
+      snapshotId: cached.response.snapshotId,
+      media: cached.media,
+      response: cloneReleaseResponse(cached.response),
+    };
+  }
+
   private removeSnapshot(key: string): void {
     const cached = this.releaseCache.get(key);
     if (!cached) return;
@@ -797,7 +855,7 @@ export class DiscoveryService {
       releases: snapshotReleases,
     };
     this.removeSnapshot(key);
-    this.releaseCache.set(key, { response, expiresAt, releaseIds });
+    this.releaseCache.set(key, { response, expiresAt, releaseIds, media: item });
     while (this.releaseCache.size > 200) {
       const oldest = this.releaseCache.keys().next().value;
       if (typeof oldest !== "string") break;

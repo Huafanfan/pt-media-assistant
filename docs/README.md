@@ -1,22 +1,23 @@
 # 文档导航
 
-整理日期：2026-09-19。先按用途选择文档；历史记录中的配置、状态和命令不应直接当作当前部署依据。
+当前前端已于 2026-11-09 改为搜索/任务两页；旧功能与设计文档仅作历史参考。整理日期：2026-09-19。先按用途选择文档；历史记录中的配置、状态和命令不应直接当作当前部署依据。
 
 ## 现行说明
 
 | 文档 | 用途 |
 | --- | --- |
+| [精简版运行说明](operations/SIMPLE_UI.md) | 当前两页 UI、部署与回滚 |
 | [项目 README](../README.md) | 当前功能、快速开始、部署入口和 API 概览 |
 | [架构说明](ARCHITECTURE.md) | 系统职责、数据流与安全边界 |
 | [AI 运行说明](operations/AI_OPERATIONS.md) | AI 配置、运行和降级说明；含历史演进章节，实际环境需核对 |
 
-## 待审阅功能
+## 功能状态
 
 | 功能 | 需求 | 执行清单 | 状态 |
 | --- | --- | --- | --- |
-| RELEASE-001 候选片源理解与推荐 | [Feature](features/RELEASE_SELECTION.md) | [TODO](features/RELEASE_SELECTION_TODO.md) | 待用户审阅，尚未开始实现 |
+| RELEASE-001 候选片源理解与推荐 | [Feature](features/RELEASE_SELECTION.md) | [TODO](features/RELEASE_SELECTION_TODO.md) / [审查记录](features/RELEASE_SELECTION_REVIEW.md) / [验证记录](verification/release-selection/README.md) / [部署记录](archive/deployments/DEPLOY_RELEASE001_20260920.md) | 已实现并部署到家庭服务器试用（`29d6e48`）；Astra 七轮审查修复后未复核；待独立复核与人工验收 |
 
-本功能覆盖电影、电视剧和综艺的范围识别、片源展示、规则排序与按需 AI。整理文档不改变其审批状态。
+本功能覆盖电影、电视剧和综艺的范围识别、片源展示、规则排序与按需 AI。真实下载与付费模型 smoke 不作为验收手段。
 
 ## 设计参考
 

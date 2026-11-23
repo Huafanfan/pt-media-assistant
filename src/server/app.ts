@@ -56,8 +56,17 @@ import {
   isPrivateNetworkIp,
   type Session,
 } from "./auth.js";
+import {
+  releaseSelectionRequestSchema,
+  selectionAssistRequestSchema,
+  type ReleaseSelectionResponse,
+  type SelectionAssistResponse,
+} from "../shared/release-selection.js";
 import { loadConfig, type AppConfig } from "./config.js";
 import { DiscoveryItemNotFoundError, DiscoveryService } from "./discovery.js";
+import { SelectionAssistService } from "./release-selection/assist.js";
+import { SelectionError, SelectionService } from "./release-selection/service.js";
+import { SearchSnapshotRegistry } from "./release-selection/snapshots.js";
 import { DoubanClient } from "./douban.js";
 import { HistoryStore } from "./history-store.js";
 import { NasGuard, type NasPreflight } from "./nas.js";
@@ -74,7 +83,11 @@ const APP_VERSION = "0.1.0";
 export type ProwlarrService = Pick<
   ProwlarrClient,
   "search" | "getRelease" | "grab" | "check"
->;
+> & {
+  /** Optional so existing test fakes remain valid; the real client has it. */
+  hasRelease?: ProwlarrClient["hasRelease"];
+  releaseReleases?: ProwlarrClient["releaseReleases"];
+};
 export type QBittorrentService = Pick<
   QBittorrentClient,
   "listTorrents" | "duplicateForRelease" | "check" | "torrentAction"
@@ -94,6 +107,7 @@ export type DiscoveryServiceContract = Pick<
   getActorProfile?: DiscoveryService["getActorProfile"];
   getActorAvatar?: DiscoveryService["getActorAvatar"];
   getActorWorkPoster?: DiscoveryService["getActorWorkPoster"];
+  getReleaseSnapshot?: DiscoveryService["getReleaseSnapshot"];
 };
 
 export type AppServices = {
@@ -107,6 +121,7 @@ export type AppServices = {
   qbittorrent?: QBittorrentService;
   nas?: NasService;
   discovery?: DiscoveryServiceContract;
+  selection?: SelectionService;
   staticRoot?: string;
 };
 
@@ -339,6 +354,18 @@ export async function createApp(
     });
   const discovery =
     services.discovery ?? new DiscoveryService(new DoubanClient(), prowlarr);
+  const selection =
+    services.selection ??
+    new SelectionService({
+      discovery: {
+        getReleaseSnapshot: (mediaType, itemId) =>
+          discovery.getReleaseSnapshot?.(mediaType, itemId),
+      },
+      searchSnapshots: new SearchSnapshotRegistry({
+        isReleaseAlive: (id) => prowlarr.hasRelease?.(id) ?? true,
+        onEvict: (ids) => prowlarr.releaseReleases?.(ids),
+      }),
+    });
   // Durable seen records and AI preferences are family-shared; without a data
   // directory (hand-built test configs) the store stays in memory only.
   const history =
@@ -999,6 +1026,73 @@ export async function createApp(
     ? (services.aiProvider ??
       (config.aiApiKey ? providerFromConfig(config) : undefined))
     : undefined;
+  selection.configureAssist(
+    new SelectionAssistService({
+      provider: aiProvider,
+      enabled: Boolean(aiProvider) && config.aiEnabled,
+    }),
+  );
+
+  app.post(
+    "/api/releases/selection/assist",
+    {
+      config: { rateLimit: { max: 20, timeWindow: "10 minutes" } },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      if (!authenticate(request, reply, sessions, config.configuredOrigin))
+        return;
+      let body: z.infer<typeof selectionAssistRequestSchema>;
+      try {
+        body = selectionAssistRequestSchema.parse(request.body);
+      } catch {
+        return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+      }
+      const controller = new AbortController();
+      const onClose = (): void => {
+        if (!reply.raw.writableEnded) controller.abort();
+      };
+      request.raw.once("aborted", onClose);
+      reply.raw.once("close", onClose);
+      const startedAt = Date.now();
+      try {
+        const ownerId = getSessionId(request) ?? request.ip;
+        const response: SelectionAssistResponse = await selection.assist(
+          ownerId,
+          body,
+          { signal: controller.signal },
+        );
+        request.log.info({
+          event: "selection_assist",
+          mode: body.mode,
+          durationMs: Date.now() - startedAt,
+          analysis: response.analysis,
+          analyzed: response.analyzedCandidateCount,
+          total: response.totalCandidateCount,
+          warningCodes: response.warnings.map((warning) => warning.code),
+        });
+        return reply.send(response);
+      } catch (error) {
+        if (error instanceof SelectionError) {
+          const status =
+            error.code === "SNAPSHOT_EXPIRED" ||
+            error.code === "SNAPSHOT_NOT_FOUND"
+              ? 409
+              : 400;
+          return sendError(reply, status, error.message, error.code);
+        }
+        return sendError(
+          reply,
+          500,
+          "Selection assist failed",
+          "SELECTION_ASSIST_FAILED",
+        );
+      } finally {
+        request.raw.off("aborted", onClose);
+        reply.raw.off("close", onClose);
+      }
+    },
+  );
   const webSearch =
     services.webSearch ??
     (config.tavilyApiKey
@@ -1250,11 +1344,19 @@ export async function createApp(
           parsed.intent,
           parsed.limit,
         );
+        // Direct-search releases get a bounded snapshot reference so the
+        // selection surface can rank them without a second PT query.
+        const snapshot = selection.registerSearchSnapshot(
+          parsed.query,
+          result.releases,
+        );
         // Keep the user's visible query in the response while the upstream only
         // receives the normalized search term.
-        return reply
-          .header("Cache-Control", "no-store")
-          .send({ ...result, query: parsed.query });
+        return reply.header("Cache-Control", "no-store").send({
+          ...result,
+          query: parsed.query,
+          snapshotId: snapshot.snapshotId,
+        });
       } catch {
         return genericUpstreamError(reply);
       }
@@ -1262,9 +1364,41 @@ export async function createApp(
   );
 
   app.post(
+    "/api/releases/selection",
+    {
+      config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      if (!authenticate(request, reply, sessions, config.configuredOrigin))
+        return;
+      let body: z.infer<typeof releaseSelectionRequestSchema>;
+      try {
+        body = releaseSelectionRequestSchema.parse(request.body);
+      } catch {
+        return sendError(reply, 400, "Invalid request", "INVALID_REQUEST");
+      }
+      try {
+        const response: ReleaseSelectionResponse = selection.preview(body);
+        return reply.send(response);
+      } catch (error) {
+        if (error instanceof SelectionError) {
+          const status =
+            error.code === "SNAPSHOT_EXPIRED" ||
+            error.code === "SNAPSHOT_NOT_FOUND"
+              ? 409
+              : 400;
+          return sendError(reply, status, error.message, error.code);
+        }
+        return sendError(reply, 500, "Selection failed", "SELECTION_FAILED");
+      }
+    },
+  );
+
+  app.post(
     "/api/grab/preview",
     {
-      config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
+      config: { rateLimit: { max: 60, timeWindow: "10 minutes" } },
     },
     async (request, reply) => {
       if (!authenticate(request, reply, sessions, config.configuredOrigin))
@@ -1309,7 +1443,8 @@ export async function createApp(
   app.post(
     "/api/grab",
     {
-      config: { rateLimit: { max: 5, timeWindow: "10 minutes" } },
+      // Match a full, explicitly selected search batch; still bounded per IP.
+      config: { rateLimit: { max: 50, timeWindow: "10 minutes" } },
     },
     async (request, reply) => {
       if (!authenticate(request, reply, sessions, config.configuredOrigin))

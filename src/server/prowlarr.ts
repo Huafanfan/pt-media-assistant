@@ -311,6 +311,42 @@ function hasNumber(value: unknown): boolean {
 }
 
 /** Reduce one full Prowlarr ReleaseResource to the browser-safe contract. */
+function normalizeSource(value: unknown): string | undefined {
+  const text = stringValue(value).toLowerCase();
+  if (!text) return undefined;
+  if (/remux/u.test(text)) return "remux";
+  if (/web[\s._-]?rip/u.test(text)) return "webrip";
+  if (/web[\s._-]?(?:dl|d l)?\b/u.test(text)) return "webdl";
+  if (/blu[\s._-]?ray|bdrip|brrip|bdmv/u.test(text)) return "bluray";
+  if (/hd ?tv|uhd ?tv|tvrip/u.test(text)) return "hdtv";
+  if (/dvd/u.test(text)) return "dvd";
+  return undefined;
+}
+
+function normalizeHdr(value: unknown): string | undefined {
+  const text = stringValue(value).toLowerCase();
+  if (!text) return undefined;
+  if (/dolby[\s._-]?vision|dovi/u.test(text)) return "dolby_vision";
+  if (/hdr10\s*\+|hdr10plus/u.test(text)) return "hdr10plus";
+  if (/hdr10/u.test(text)) return "hdr10";
+  if (/hlg/u.test(text)) return "hlg";
+  if (/\bhdr\b/u.test(text)) return "hdr";
+  if (/\bsdr\b/u.test(text)) return "sdr";
+  return undefined;
+}
+
+function upstreamFileCount(raw: JsonObject): number | undefined {
+  for (const key of ["files", "fileCount"] as const) {
+    const value = raw[key];
+    if (value === undefined || value === null) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed < 100000)
+      return Math.floor(parsed);
+  }
+  return undefined;
+}
+
+/** Reduce one full Prowlarr ReleaseResource to the browser-safe contract. */
 export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
   const title = boundedString(
     getRawObjectValue(raw, "title", "sortTitle", "fileName"),
@@ -323,6 +359,13 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
   const protocol =
     stringValue(raw.protocol).toLowerCase() === "usenet" ? "usenet" : "torrent";
   const season = inferSeason(title);
+  const source = normalizeSource(
+    getRawObjectValue(raw, "source", "videoSource", "sourceType"),
+  );
+  const hdr = normalizeHdr(
+    getRawObjectValue(raw, "hdr", "dynamicRange", "videoDynamicRange"),
+  );
+  const files = upstreamFileCount(raw);
   return {
     id,
     title,
@@ -345,6 +388,9 @@ export function sanitizeRelease(raw: JsonObject, id: string): ReleaseSummary {
     ...(season ? { season } : {}),
     freeleech: isFreeleech(raw),
     freeleechState: freeleechState(raw),
+    ...(source ? { source } : {}),
+    ...(hdr ? { hdr } : {}),
+    ...(files !== undefined ? { fileCount: files } : {}),
     evidence: {
       resolution: normalizeResolution(
         getRawObjectValue(raw, "resolution", "quality"),

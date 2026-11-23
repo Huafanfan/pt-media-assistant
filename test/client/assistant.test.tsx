@@ -5,7 +5,6 @@ import { AssistantRecommendations } from '../../src/client/components/AssistantR
 import { AssistantPreferences } from '../../src/client/components/AssistantPreferences';
 import { AssistantThread } from '../../src/client/components/AssistantThread';
 import { useAssistant } from '../../src/client/hooks/useAssistant';
-import { assistantReferenceIndex } from '../../src/client/App';
 import { ApiError } from '../../src/client/api';
 import type { ApiClient } from '../../src/client/api';
 const card:AssistantRecommendationCard={cardId:'card_12345678',mediaId:'1292267',mediaType:'movie',title:'银河系漫游指南',genres:['科幻'],summary:'太空喜剧',reason:'适合轻松观看',evidenceIds:['metadata:movie:1292267'],constraintResults:[],availability:'available',actionableUntil:new Date(Date.now()+86400000).toISOString(),rankedReleases:[]};
@@ -90,13 +89,6 @@ describe('AI recommendation UI',()=>{
   await act(async()=>{await result.current.clear();});
   expect(cancel).toHaveBeenCalledTimes(1);
   await act(async()=>{resolve(response);await pending;});expect(result.current.messages).toEqual([]);expect(result.current.cards).toEqual([]);
- });
-
- it('binds Chinese and numeric ordinals to the displayed card position',()=>{
-  expect(assistantReferenceIndex('帮我下第二部')).toBe(1);
-  expect(assistantReferenceIndex('只要第 3 个版本')).toBe(2);
-  expect(assistantReferenceIndex('帮我下第4项')).toBe(3);
-  expect(assistantReferenceIndex('帮我下这个')).toBeNull();
  });
 
  it('resets expired conversation state so stale cards cannot be reused',async()=>{

@@ -34,6 +34,16 @@ import {
   type AssistantTurnRequest,
   type AssistantTurnResponse,
 } from "../shared/assistant";
+import {
+  releaseSelectionRequestSchema,
+  releaseSelectionResponseSchema,
+  selectionAssistRequestSchema,
+  selectionAssistResponseSchema,
+  type ReleaseSelectionRequest,
+  type ReleaseSelectionResponse,
+  type SelectionAssistRequest,
+  type SelectionAssistResponse,
+} from "../shared/release-selection";
 
 export const DESTINATION_PATH = "/Volumes/YourNAS/pt";
 
@@ -451,6 +461,9 @@ function normalizeSearch(payload: unknown): SearchResponse {
     total: asFiniteNumber(value?.total, releases.length),
     elapsedMs: asFiniteNumber(value?.elapsedMs),
     releases,
+    ...(typeof value?.snapshotId === "string" && value.snapshotId
+      ? { snapshotId: value.snapshotId }
+      : {}),
   };
 }
 
@@ -699,6 +712,15 @@ function normalizeDiscoveryReleases(
       ? value.status
       : "unavailable";
   return {
+    ...(typeof value?.snapshotId === "string" && value.snapshotId
+      ? { snapshotId: value.snapshotId }
+      : {}),
+    ...(typeof value?.expiresAt === "string" && value.expiresAt
+      ? { expiresAt: value.expiresAt }
+      : {}),
+    ...(typeof value?.actionableUntil === "string" && value.actionableUntil
+      ? { actionableUntil: value.actionableUntil }
+      : {}),
     itemId: asString(value?.itemId),
     query: asString(value?.query),
     status,
@@ -804,7 +826,7 @@ function normalizeHistory(payload: unknown): HistoryResponse {
 
 export type ApiClient = {
   getSession(): Promise<SessionResponse>;
-  getHealth(): Promise<ServiceHealth>;
+  getHealth(signal?: AbortSignal): Promise<ServiceHealth>;
   pair(request: PairRequest): Promise<SessionResponse>;
   search(request: SearchRequest, csrfToken: string): Promise<SearchResponse>;
   getDiscoveryCollection(
@@ -866,6 +888,15 @@ export type ApiClient = {
     releaseId: string,
     csrfToken: string,
   ): Promise<GrabPreviewResponse>;
+  selectReleases?(
+    request: ReleaseSelectionRequest,
+    csrfToken: string,
+  ): Promise<ReleaseSelectionResponse>;
+  assistReleaseSelection?(
+    request: SelectionAssistRequest,
+    csrfToken: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SelectionAssistResponse>;
   grab(request: GrabRequest, csrfToken: string): Promise<GrabResponse>;
   getTorrents(csrfToken: string): Promise<TorrentSummary[]>;
   torrentAction?(
@@ -968,9 +999,9 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
       );
     },
 
-    async getHealth() {
+    async getHealth(signal) {
       return normalizeHealth(
-        await requestJson<unknown>("/api/health", undefined, fetchImpl),
+        await requestJson<unknown>("/api/health", { signal }, fetchImpl),
       );
     },
 
@@ -1000,6 +1031,49 @@ export function createApiClient(fetchImpl?: typeof fetch): ApiClient {
           fetchImpl,
         ),
       );
+    },
+
+    async selectReleases(request, csrfToken) {
+      const payload = await requestJson<unknown>(
+        "/api/releases/selection",
+        {
+          method: "POST",
+          headers: withCsrf(csrfToken),
+          body: JSON.stringify(releaseSelectionRequestSchema.parse(request)),
+        },
+        fetchImpl,
+      );
+      const parsed = releaseSelectionResponseSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new ApiError(
+          "片源排序结果格式无效。",
+          502,
+          "INVALID_SELECTION_RESPONSE",
+        );
+      }
+      return parsed.data;
+    },
+
+    async assistReleaseSelection(request, csrfToken, options) {
+      const payload = await requestJson<unknown>(
+        "/api/releases/selection/assist",
+        {
+          method: "POST",
+          headers: withCsrf(csrfToken),
+          body: JSON.stringify(selectionAssistRequestSchema.parse(request)),
+          ...(options?.signal ? { signal: options.signal } : {}),
+        },
+        fetchImpl,
+      );
+      const parsed = selectionAssistResponseSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new ApiError(
+          "AI 辅助结果格式无效。",
+          502,
+          "INVALID_ASSIST_RESPONSE",
+        );
+      }
+      return parsed.data;
     },
 
     async getDiscoveryCollection(collection, csrfToken, page, limit) {
